@@ -1,0 +1,27 @@
+"""MatrixChat model package: matrix-structured wrapper around Qwen3."""
+
+from .matrix_qwen import (
+    MatrixQwenConfig,
+    MatrixCausalLMOutput,
+    MatrixQwenForCausalLM,
+)
+from .masks import build_matrix_causal_mask
+from .generation import generate_next_tokens_for_all_agents
+from .lora_utils import (
+    freeze_base_model,
+    unfreeze_last_n_layers,
+    apply_lora_if_enabled,
+    count_trainable_parameters,
+)
+
+__all__ = [
+    "MatrixQwenConfig",
+    "MatrixCausalLMOutput",
+    "MatrixQwenForCausalLM",
+    "build_matrix_causal_mask",
+    "generate_next_tokens_for_all_agents",
+    "freeze_base_model",
+    "unfreeze_last_n_layers",
+    "apply_lora_if_enabled",
+    "count_trainable_parameters",
+]

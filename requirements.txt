@@ -1,0 +1,10 @@
+torch
+transformers>=4.51.0
+peft
+accelerate
+datasets
+pytest
+numpy
+
+# Optional (not required for unit tests):
+# bitsandbytes

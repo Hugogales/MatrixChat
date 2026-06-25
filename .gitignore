@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Run artifacts (keep the directories via .gitkeep, ignore generated contents)
+hyperparameters/run_*.json
+logs/run_*/
+logs/*.out
+logs/*.err
+checkpoints/run_*/
+checkpoints/**/*.pt
+
+# Models / data
+*.bin
+*.safetensors
+data/**/*.jsonl
+data/**/*.parquet
+!data/README.md
+!data/dataset_plan.md

@@ -50,10 +50,22 @@ the final architecture.
 - `training/config.py`: argparse config with validation.
 - `training/run_ids.py`: run-id + hyperparameter/log/checkpoint tracking.
 - `training/toy_batch.py`: tiny Qwen3 factory + toy matrix batch.
-- `main.py`: smoke training loop with run-id tracking.
+- `main.py`: smoke training loop with run-id tracking (plus `--dry_run`,
+  `--print_trainable_params`, `--save_checkpoint`, JSONL metrics).
 - `scripts/train_matrix_qwen.sbatch`: SLURM entrypoint tailored for Rosie.
-- `tests/`: pytest suite (shapes, forward/backward, position ids, masks,
-  generation, LoRA/freezing, variable agents).
+- `tests/`: pytest suite (**41 tests**) across:
+  - `test_matrix_shapes.py` -- shapes, variable agents, flatten/unflatten roundtrip.
+  - `test_forward_backward.py` -- finite loss + agent-embedding grad norm > 0.
+  - `test_position_ids.py` -- exact flat/column position-id values.
+  - `test_masks.py` -- mask shape, same-column semantics, first-column self.
+  - `test_causality.py` -- finite logits, no future leakage, no same-column
+    cross-agent leakage.
+  - `test_wrapper_features.py` -- channel embeddings, position-mode effect, loss
+    ignore_index, num_agents > max_agents raises.
+  - `test_generation.py` -- next-token shape `[B, A]`, greedy + sampling.
+  - `test_lora_freezing.py` -- freeze/unfreeze/LoRA (skips cleanly if no PEFT).
+  - `test_config.py` -- str2bool, target-module parsing, arg validation.
+  - `test_main_integration.py` -- end-to-end `main.main()` smoke + dry-run.
 
 ## 3. What is intentionally NOT implemented yet
 
@@ -234,12 +246,17 @@ srun --account=undergrad_research --partition=teaching --gres=gpu:1 --pty bash  
 │   ├── run_ids.py
 │   └── toy_batch.py
 ├── tests/
+│   ├── conftest.py            # project-root import + tiny_model / matrix_config fixtures
 │   ├── test_matrix_shapes.py
 │   ├── test_forward_backward.py
 │   ├── test_position_ids.py
 │   ├── test_masks.py
+│   ├── test_causality.py
+│   ├── test_wrapper_features.py
 │   ├── test_generation.py
-│   └── test_lora_freezing.py
+│   ├── test_lora_freezing.py
+│   ├── test_config.py
+│   └── test_main_integration.py
 ├── scripts/train_matrix_qwen.sbatch
 ├── logs/.gitkeep
 ├── hyperparameters/.gitkeep
@@ -248,7 +265,8 @@ srun --account=undergrad_research --partition=teaching --gres=gpu:1 --pty bash  
 ├── main.py
 ├── requirements.txt
 ├── README.md
-└── pytest.ini
+├── pytest.ini
+└── .gitignore
 ```
 
 ## 10. Key shapes reference

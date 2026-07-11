@@ -52,11 +52,14 @@ command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi || echo "nvidia-smi not avai
 # pip install -r requirements.txt
 
 # ---- Hyperparameters (edit these) -------------------------------------------
+# For a REAL MELD run set: USE_TINY_MODEL=false, MODEL_NAME=models/Qwen3-4B-Instruct-2507,
+# PROCESSED_DATA_DIR=$HOME/matrixchat/processed, DATASET_WEIGHTS="meld=1.0",
+# SILENCE_TOKEN_ID=151669, LORA_ENABLE=true, GRADIENT_CHECKPOINTING=true, BATCH_SIZE=1.
 MODEL_NAME="Qwen/Qwen3-4B-Instruct-2507"
 USE_TINY_MODEL=true
 MAX_AGENTS=8
-NUM_AGENTS=4
-SEQ_LEN=16
+NUM_AGENTS=4                    # toy path only (real path gets shapes from data)
+SEQ_LEN=16                      # toy path only
 BATCH_SIZE=2
 POSITION_MODE="flat"            # choices: flat, column
 USE_AGENT_EMBEDDINGS=true
@@ -65,7 +68,11 @@ ATTN_MASK_MODE="matrix_causal"  # choices: none, matrix_causal
 QUERY_TOKEN_ID=0
 LEARNING_RATE=1e-4
 WEIGHT_DECAY=0.0
-NUM_STEPS=3
+NUM_STEPS=3                     # real path: max optimizer steps (0 = full epochs)
+NUM_EPOCHS=1
+NUM_WORKERS=2
+LOG_EVERY=10
+GRADIENT_CHECKPOINTING=false
 LORA_ENABLE=false
 LORA_R=8
 LORA_ALPHA=16
@@ -75,6 +82,12 @@ FREEZE_BASE_MODEL=true
 UNFREEZE_LAST_N_LAYERS=0
 TORCH_DTYPE="bfloat16"
 DEVICE="cuda"
+# ---- Stage-2 data / silence (empty PROCESSED_DATA_DIR => toy smoke path) -----
+PROCESSED_DATA_DIR=""                 # e.g. $HOME/matrixchat/processed
+DATASET_WEIGHTS=""                    # e.g. "meld=1.0" (train MELD only)
+SILENCE_TOKEN_ID=-1                   # 151669 for Qwen3-4B
+SILENCE_LOSS_WEIGHT=1.0               # <1.0 (e.g. 0.1) to curb over-silence
+DROP_SILENCE=false
 
 # ---- Launch -----------------------------------------------------------------
 python main.py \
@@ -92,6 +105,10 @@ python main.py \
   --learning_rate "$LEARNING_RATE" \
   --weight_decay "$WEIGHT_DECAY" \
   --num_steps "$NUM_STEPS" \
+  --num_epochs "$NUM_EPOCHS" \
+  --num_workers "$NUM_WORKERS" \
+  --log_every "$LOG_EVERY" \
+  --gradient_checkpointing "$GRADIENT_CHECKPOINTING" \
   --lora_enable "$LORA_ENABLE" \
   --lora_r "$LORA_R" \
   --lora_alpha "$LORA_ALPHA" \
@@ -100,6 +117,11 @@ python main.py \
   --freeze_base_model "$FREEZE_BASE_MODEL" \
   --unfreeze_last_n_layers "$UNFREEZE_LAST_N_LAYERS" \
   --torch_dtype "$TORCH_DTYPE" \
-  --device "$DEVICE"
+  --device "$DEVICE" \
+  --processed_data_dir "$PROCESSED_DATA_DIR" \
+  --dataset_weights "$DATASET_WEIGHTS" \
+  --silence_token_id "$SILENCE_TOKEN_ID" \
+  --silence_loss_weight "$SILENCE_LOSS_WEIGHT" \
+  --drop_silence "$DROP_SILENCE"
 
 echo "done."

@@ -157,6 +157,17 @@ sinfo -o "%P %N %G"
 - DGX H100 -> 8x H100, NVLink (`--gres=gpu:h100:N`) -> best for the real
   `Qwen/Qwen3-4B-Instruct-2507` run (set `USE_TINY_MODEL=false`).
 
+### Interactive shell on Rosie (Singularity container)
+
+Use this to get an interactive bash terminal inside the MSOE TensorFlow/PyTorch
+container (the `--nv` flag exposes the GPUs, `-B /data:/data` binds the shared
+share). Adjust `--gres=gpu:N` to request GPUs (use `gpu:0` for a CPU-only shell):
+
+```bash
+srun --pty --partition=teaching --gres=gpu:0 --cpus-per-task=4 --time=1-00:00:00 \
+  singularity shell --nv -B /data:/data /data/containers/msoe-tf2x.sif
+```
+
 ### SLURM cheatsheet
 
 ```bash
@@ -165,6 +176,9 @@ squeue -u $USER
 sinfo -o "%P %N %G"
 scancel <jobid>
 srun --account=undergrad_research --partition=teaching --gres=gpu:1 --pty bash
+# Interactive shell inside the MSOE container (CPU-only example: gpu:0):
+srun --pty --partition=teaching --gres=gpu:0 --cpus-per-task=4 --time=1-00:00:00 \
+  singularity shell --nv -B /data:/data /data/containers/msoe-tf2x.sif
 ```
 
 ## Current limitations

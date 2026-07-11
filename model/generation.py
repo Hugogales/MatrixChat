@@ -13,6 +13,40 @@ import torch
 
 
 @torch.no_grad()
+def generate_matrix(
+    model,
+    input_ids: torch.LongTensor,   # [B, A, T]
+    max_new_tokens: int,
+    temperature: float = 0.0,
+) -> torch.LongTensor:
+    """Autoregressively generate ``max_new_tokens`` per agent.
+
+    At each step, reads the logits at the most recent time column (each agent's
+    next-token prediction), picks a token (greedy if ``temperature == 0``, else
+    samples), and appends it as a new column. Returns the generated tokens shaped
+    ``[B, A, max_new_tokens]`` (the appended continuation, not the prompt).
+    """
+    was_training = model.training
+    model.eval()
+    cur = input_ids
+    b, a, _ = input_ids.shape
+    generated = []
+    for _ in range(max_new_tokens):
+        out = model(input_ids=cur)
+        last = out.logits[:, :, -1, :]  # [B, A, V]
+        if temperature and temperature > 0:
+            probs = torch.softmax(last.float() / temperature, dim=-1)
+            nxt = torch.multinomial(probs.reshape(b * a, -1), num_samples=1).reshape(b, a)
+        else:
+            nxt = last.argmax(dim=-1)  # [B, A]
+        generated.append(nxt)
+        cur = torch.cat([cur, nxt.unsqueeze(-1)], dim=2)
+    if was_training:
+        model.train()
+    return torch.stack(generated, dim=2).long()  # [B, A, steps]
+
+
+@torch.no_grad()
 def generate_next_tokens_for_all_agents(
     model,
     input_ids: torch.LongTensor,        # [B, A, T]

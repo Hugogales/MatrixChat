@@ -26,7 +26,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .masks import build_matrix_causal_mask
+from .masks import build_matrix_causal_mask, build_matrix_mask_from_coords
 
 
 @dataclass
@@ -42,6 +42,24 @@ class MatrixQwenConfig:
     query_token_id: int = 0
     attn_mask_mode: str = "matrix_causal"  # "none" or "matrix_causal"
     allow_same_column: bool = False
+    # If set, cells holding this token id are treated as "silence" and made
+    # invisible to all other cells in the attention mask. None disables silence.
+    silence_token_id: Optional[int] = None
+    # Loss weight for the silence token in the custom cross-entropy. Silence is
+    # supervised on EVERY silent cell (see data/convert.py), so it is abundant;
+    # a weight < 1.0 down-weights it to prevent over-silent behavior. 1.0 = no
+    # change. Only applied when silence_token_id is set.
+    silence_loss_weight: float = 1.0
+    # Give the silence token a LEARNED input representation. The silence id is a
+    # reserved vocab token whose base embedding is frozen and meaningless; when
+    # this is True (and silence_token_id is set), silent cells use a trainable
+    # `silence_embedding` vector instead, so silence context is informative.
+    learned_silence_embedding: bool = True
+    # If True (and silence_token_id is set), silent cells are physically DROPPED
+    # from the flattened stream before the base model (compaction) instead of
+    # masked, saving the per-token compute. Logits are scattered back into the
+    # [B, A, T, V] grid. Produces identical logits at kept cells as masking.
+    drop_silence: bool = False
 
 
 @dataclass
@@ -87,6 +105,14 @@ class MatrixQwenForCausalLM(nn.Module):
             nn.init.normal_(self.channel_embeddings.weight, mean=0.0, std=0.02)
         else:
             self.channel_embeddings = None
+
+        # Learned silence embedding (trainable, replaces the frozen reserved-token
+        # embedding at silent cells so silence context is meaningful).
+        if matrix_config.silence_token_id is not None and matrix_config.learned_silence_embedding:
+            self.silence_embedding = nn.Embedding(1, hidden_size)
+            nn.init.normal_(self.silence_embedding.weight, mean=0.0, std=0.02)
+        else:
+            self.silence_embedding = None
 
     # ------------------------------------------------------------------
     # Helpers
@@ -144,19 +170,106 @@ class MatrixQwenForCausalLM(nn.Module):
         flat_agent_ids: torch.Tensor,
         flat_channel_ids: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        """Compute ``token_embeds + agent_embeds (+ channel_embeds)``."""
+        """Compute ``token_embeds + agent_embeds (+ channel_embeds)``.
+
+        The agent/channel embedding tables are kept in fp32 (good for stable
+        optimization) while the base model may run in bf16/fp16. Cast the added
+        embeddings to the token-embedding dtype so the sum -- and therefore the
+        tensor handed to the base model -- always matches the base model's dtype.
+        """
         token_embeds = self.base_model.get_input_embeddings()(flat_input_ids)
+
+        # Replace the (frozen, meaningless) reserved-token embedding at silent
+        # cells with the learned silence embedding.
+        if self.silence_embedding is not None:
+            silent = (flat_input_ids == self.matrix_config.silence_token_id).unsqueeze(-1)
+            sil_vec = self.silence_embedding.weight[0].to(token_embeds.dtype)
+            token_embeds = torch.where(silent, sil_vec, token_embeds)
+
         inputs_embeds = token_embeds
 
         if self.agent_embeddings is not None:
-            inputs_embeds = inputs_embeds + self.agent_embeddings(flat_agent_ids)
+            agent_embeds = self.agent_embeddings(flat_agent_ids).to(token_embeds.dtype)
+            inputs_embeds = inputs_embeds + agent_embeds
 
         if self.channel_embeddings is not None:
             if flat_channel_ids is None:
                 flat_channel_ids = torch.zeros_like(flat_input_ids)
-            inputs_embeds = inputs_embeds + self.channel_embeddings(flat_channel_ids)
+            channel_embeds = self.channel_embeddings(flat_channel_ids).to(token_embeds.dtype)
+            inputs_embeds = inputs_embeds + channel_embeds
 
         return inputs_embeds
+
+    # ------------------------------------------------------------------
+    # Silence compaction (drop silent cells, scatter logits back)
+    # ------------------------------------------------------------------
+    def _forward_compacted(
+        self,
+        inputs_embeds: torch.Tensor,   # [B, S, H]
+        position_ids: torch.Tensor,    # [B, S]
+        flat_input_ids: torch.Tensor,  # [B, S]
+        num_agents: int,
+        seq_len: int,
+        silence_token_id: int,
+    ) -> torch.Tensor:
+        """Run the base model over only the non-silent cells, then scatter the
+        logits back into the full ``[B, S, V]`` grid (silent slots stay zero).
+
+        Surviving cells keep their original ``position_ids`` (so RoPE is
+        unchanged) and their original ``(time, agent)`` coordinates (so the
+        matrix-causal rule is preserved). Each batch element keeps a different
+        number of cells, so they are packed to the front and padded to the batch
+        max length; padding is blocked by the attention mask.
+        """
+        b, s, h = inputs_embeds.shape
+        device = inputs_embeds.device
+
+        keep = flat_input_ids != silence_token_id              # [B, S]
+        max_k = int(keep.sum(dim=1).max().item())
+        max_k = max(max_k, 1)  # guard against an all-silent batch
+
+        flat_idx = torch.arange(s, device=device)
+        time_full = (flat_idx // num_agents).unsqueeze(0).expand(b, s)
+        agent_full = (flat_idx % num_agents).unsqueeze(0).expand(b, s)
+
+        # Destination slot (front-packed) for each kept cell.
+        dest = keep.long().cumsum(dim=1) - 1                   # [B, S]
+        src_b, src_i = keep.nonzero(as_tuple=True)             # kept (batch, flat) indices
+        d = dest[src_b, src_i]
+
+        comp_embeds = inputs_embeds.new_zeros(b, max_k, h)
+        comp_pos = position_ids.new_zeros(b, max_k)
+        comp_time = torch.zeros(b, max_k, dtype=torch.long, device=device)
+        comp_agent = torch.zeros(b, max_k, dtype=torch.long, device=device)
+        comp_valid = torch.zeros(b, max_k, dtype=torch.bool, device=device)
+
+        comp_embeds[src_b, d] = inputs_embeds[src_b, src_i]
+        comp_pos[src_b, d] = position_ids[src_b, src_i]
+        comp_time[src_b, d] = time_full[src_b, src_i]
+        comp_agent[src_b, d] = agent_full[src_b, src_i]
+        comp_valid[src_b, d] = True
+
+        attention_mask = build_matrix_mask_from_coords(
+            time=comp_time,
+            agent=comp_agent,
+            valid=comp_valid,
+            dtype=comp_embeds.dtype,
+            allow_same_column=self.matrix_config.allow_same_column,
+        )
+
+        outputs = self.base_model(
+            inputs_embeds=comp_embeds,
+            position_ids=comp_pos,
+            attention_mask=attention_mask,
+            use_cache=False,
+            return_dict=True,
+        )
+        comp_logits = outputs.logits  # [B, max_k, V]
+        v = comp_logits.shape[-1]
+
+        flat_logits = comp_logits.new_zeros(b, s, v)
+        flat_logits[src_b, src_i] = comp_logits[src_b, d]
+        return flat_logits
 
     # ------------------------------------------------------------------
     # Forward
@@ -194,24 +307,43 @@ class MatrixQwenForCausalLM(nn.Module):
 
         position_ids = self.build_position_ids(b, a, t, device)    # [B, T*A]
 
-        if attention_mask is None and self.matrix_config.attn_mask_mode == "matrix_causal":
-            attention_mask = build_matrix_causal_mask(
-                batch_size=b,
-                num_agents=a,
-                seq_len=t,
-                device=device,
-                dtype=inputs_embeds.dtype,
-                allow_same_column=self.matrix_config.allow_same_column,
-            )
-
-        outputs = self.base_model(
-            inputs_embeds=inputs_embeds,
-            position_ids=position_ids,
-            attention_mask=attention_mask,
-            use_cache=False,
-            return_dict=True,
+        silence_token_id = self.matrix_config.silence_token_id
+        use_drop = (
+            attention_mask is None
+            and self.matrix_config.attn_mask_mode == "matrix_causal"
+            and self.matrix_config.drop_silence
+            and silence_token_id is not None
         )
-        flat_logits = outputs.logits  # [B, T*A, V]
+
+        if use_drop:
+            # Compaction path: physically drop silent cells before the base model.
+            flat_logits = self._forward_compacted(
+                inputs_embeds, position_ids, flat_input_ids, a, t, silence_token_id
+            )
+        else:
+            if attention_mask is None and self.matrix_config.attn_mask_mode == "matrix_causal":
+                silence_mask = None
+                if silence_token_id is not None:
+                    silence_mask = flat_input_ids == silence_token_id  # [B, T*A]
+                attention_mask = build_matrix_causal_mask(
+                    batch_size=b,
+                    num_agents=a,
+                    seq_len=t,
+                    device=device,
+                    dtype=inputs_embeds.dtype,
+                    allow_same_column=self.matrix_config.allow_same_column,
+                    silence_mask=silence_mask,
+                )
+
+            outputs = self.base_model(
+                inputs_embeds=inputs_embeds,
+                position_ids=position_ids,
+                attention_mask=attention_mask,
+                use_cache=False,
+                return_dict=True,
+            )
+            flat_logits = outputs.logits  # [B, T*A, V]
+
         v = flat_logits.shape[-1]
 
         logits = self.unflatten_logits(flat_logits, num_agents=a, seq_len=t)  # [B, A, T, V]
@@ -220,9 +352,17 @@ class MatrixQwenForCausalLM(nn.Module):
         if labels is not None:
             # Custom CE over matrix-aligned labels (NOT the base model's shifted loss).
             flat_labels = self.flatten_matrix(labels)  # [B, T*A]
+            weight = None
+            sid = self.matrix_config.silence_token_id
+            slw = self.matrix_config.silence_loss_weight
+            if sid is not None and slw != 1.0 and 0 <= sid < v:
+                # Down-weight the (abundant) silence token so it does not dominate.
+                weight = torch.ones(v, dtype=flat_logits.dtype, device=flat_logits.device)
+                weight[sid] = slw
             loss = F.cross_entropy(
                 flat_logits.reshape(-1, v),
                 flat_labels.reshape(-1),
+                weight=weight,
                 ignore_index=-100,
             )
 

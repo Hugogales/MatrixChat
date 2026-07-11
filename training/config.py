@@ -30,6 +30,30 @@ def parse_target_modules(value) -> list[str]:
     return [m.strip() for m in str(value).split(",") if m.strip()]
 
 
+def parse_dataset_weights(value) -> dict:
+    """Parse ``"molweni=0.25,meld=0.15,..."`` into ``{name: float}``.
+
+    Empty/None yields an empty dict (caller falls back to the manifest's
+    per-source default weights).
+    """
+    if isinstance(value, dict):
+        return {str(k): float(v) for k, v in value.items()}
+    if not value:
+        return {}
+    weights = {}
+    for pair in str(value).split(","):
+        pair = pair.strip()
+        if not pair:
+            continue
+        if "=" not in pair:
+            raise argparse.ArgumentTypeError(
+                f"Bad dataset weight {pair!r}; expected name=weight"
+            )
+        name, w = pair.split("=", 1)
+        weights[name.strip()] = float(w)
+    return weights
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="MatrixChat smoke training / forward-backward harness.",
@@ -52,10 +76,34 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--allow_same_column", type=str2bool, default=False)
     parser.add_argument("--query_token_id", type=int, default=0)
 
+    # Stage-2 data pipeline.
+    parser.add_argument("--processed_data_dir", type=str, default=None,
+                        help="Dir of processed Arrow shards + manifest.json (training input).")
+    parser.add_argument("--dataset_weights", type=parse_dataset_weights, default={},
+                        help='Per-source sampling weights, e.g. "molweni=0.25,meld=0.15". '
+                             "Empty -> use manifest default_weight per source.")
+    parser.add_argument("--silence_token_id", type=int, default=-1,
+                        help="Silence token id (-1 disables; 151669 for Qwen3-4B).")
+    parser.add_argument("--drop_silence", type=str2bool, default=False,
+                        help="Compact (drop) silent cells before the base model.")
+    parser.add_argument("--silence_loss_weight", type=float, default=1.0,
+                        help="CE loss weight for the (abundant) silence token; "
+                             "<1.0 prevents over-silent behavior. 1.0 = no change.")
+
     # Optimization.
     parser.add_argument("--learning_rate", type=float, default=1e-4)
     parser.add_argument("--weight_decay", type=float, default=0.0)
-    parser.add_argument("--num_steps", type=int, default=3)
+    parser.add_argument("--num_steps", type=int, default=3,
+                        help="Toy path: number of steps. Real-data path: max optimizer "
+                             "steps (0 = no cap, run --num_epochs fully).")
+    parser.add_argument("--num_epochs", type=int, default=1,
+                        help="Real-data path: epochs over the dataset.")
+    parser.add_argument("--num_workers", type=int, default=2,
+                        help="Real-data path: DataLoader worker processes.")
+    parser.add_argument("--gradient_checkpointing", type=str2bool, default=False,
+                        help="Enable base-model gradient checkpointing (saves memory).")
+    parser.add_argument("--log_every", type=int, default=10,
+                        help="Real-data path: log loss every N steps.")
 
     # LoRA / freezing.
     parser.add_argument("--lora_enable", type=str2bool, default=False)
@@ -69,8 +117,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--freeze_base_model", type=str2bool, default=True)
     parser.add_argument("--unfreeze_last_n_layers", type=int, default=0)
+    parser.add_argument("--unfreeze_first_n_layers", type=int, default=0,
+                        help="Unfreeze the first N (early) decoder layers so they can adapt "
+                             "to the agent-augmented input. Does NOT unfreeze the whole model, "
+                             "but makes backprop traverse the full depth.")
+
+    # Evaluation / overfitting monitoring.
+    parser.add_argument("--val_fraction", type=float, default=0.05,
+                        help="Held-out validation fraction (0 disables eval).")
+    parser.add_argument("--eval_every", type=int, default=50,
+                        help="Real-data path: run validation every N steps.")
+    parser.add_argument("--max_flat_len", type=int, default=0,
+                        help="Skip examples whose flattened length (num_agents*T) exceeds this "
+                             "(0 = keep all). Use to cap attention memory (O(S^2)).")
+
+    # Qualitative sampling (generate from a fixed probe periodically -> samples.jsonl).
+    parser.add_argument("--sample_every", type=int, default=1,
+                        help="Real-data path: generate a sample every N epochs (0 disables).")
+    parser.add_argument("--sample_prompts", type=str, nargs="+",
+                        default=["Hi! Tell me one fun fact.", "What is your favorite hobby?"],
+                        help="One prompt per agent for the periodic qualitative sample.")
+    parser.add_argument("--sample_max_new_tokens", type=int, default=24)
 
     # Runtime.
+    parser.add_argument("--run_name", type=str, default=None,
+                        help="Name for the log/checkpoint directory (logs/<run_name>, "
+                             "checkpoints/<run_name>). Default: auto run_NNNNNN.")
     parser.add_argument("--torch_dtype", type=str, default="bfloat16",
                         choices=["float32", "float16", "bfloat16"])
     parser.add_argument("--device", type=str, default="cuda")

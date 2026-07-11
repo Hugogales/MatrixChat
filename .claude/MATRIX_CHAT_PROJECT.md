@@ -41,10 +41,31 @@ the final architecture.
   - Optional channel embeddings.
   - Two position modes: `flat` and `column`.
   - Custom cross-entropy loss over matrix-aligned labels (NOT Qwen's shifted loss).
+  - `silence_token_id` (optional): cells with this id are masked out (invisible)
+    via `build_matrix_causal_mask`'s `silence_mask`. Plumbing only -- the model
+    is NOT yet trained to *choose* silence; a reserved unused id (e.g. 151669 for
+    Qwen3-4B, vocab_size 151936 > tokenizer len 151669) avoids any embedding resize.
+  - `drop_silence` (optional): when set with `silence_token_id`, silent cells are
+    physically DROPPED before the base model (compaction) instead of masked, so
+    per-token compute scales with active cells, not `A*T`. Survivors keep their
+    ORIGINAL `position_ids` (RoPE unchanged) and `(time, agent)` coords (matrix
+    rule preserved); ragged batches are front-packed and padded to the batch max
+    (padding blocked by the mask via `build_matrix_mask_from_coords`); logits are
+    scattered back into `[B, A, T, V]` (silent slots zero). Proven to match the
+    masked path bit-for-bit at kept cells (`test_silence.py::test_drop_silence_matches_mask`).
+  - dtype: agent/channel embeddings stay fp32 and are cast to the base model's
+    dtype before adding, so a bf16/fp16 base model + fp32 wrapper embeddings work.
 - `model/masks.py`: `build_matrix_causal_mask` -> additive `[B, 1, S, S]` mask.
   - `allow_same_column=False`: a cell sees all previous columns plus **itself**
     (diagonal); other agents in the same current column are blocked.
   - `allow_same_column=True`: the whole current column (`tk <= tq`) is visible.
+  - `silence_mask` (optional `[B, S]` bool): cells holding `silence_token_id`
+    are made **invisible** -- no query attends them as a key except the diagonal
+    (so their own softmax row stays well-defined; output discarded). This also
+    hides a silent cell from the same agent's later columns.
+  - `build_matrix_mask_from_coords(time, agent, valid, ...)`: coord-based mask for
+    the silence-DROP/compaction path (non-rectangular packed sequences); blocks
+    padding keys, keeps the diagonal, applies the same matrix-causal rule.
 - `model/generation.py`: `generate_next_tokens_for_all_agents` -> `[B, A]` in one pass.
 - `model/lora_utils.py`: freeze/unfreeze/LoRA/param-count helpers.
 - `training/config.py`: argparse config with validation.
@@ -53,7 +74,33 @@ the final architecture.
 - `main.py`: smoke training loop with run-id tracking (plus `--dry_run`,
   `--print_trainable_params`, `--save_checkpoint`, JSONL metrics).
 - `scripts/train_matrix_qwen.sbatch`: SLURM entrypoint tailored for Rosie.
-- `tests/`: pytest suite (**41 tests**) across:
+- `scripts/multi_agent_tokens.py`: loads the real Qwen, generates one token per
+  agent per matrix forward pass, prints columns (one per agent). Args: `--prompt`/
+  `--prompts`, `--num_agents`, `--max_new_tokens`, `--temperature`, `--chat`,
+  `--silence_token_id`/`--silent_agents`, `--drop_silence`, `--stop_on_eos`, etc.
+  Per-agent EOS (`--stop_on_eos`, default on): when an agent emits an EOS id
+  (Qwen3: `<|im_end|>`=151645 or `<|endoftext|>`=151643), it's marked finished
+  (shown with a `⏹` prefix), its remaining row is filled with the silence token
+  (so it goes invisible / droppable), and generation halts once ALL agents are
+  finished, with `--max_new_tokens` as the backstop.
+- `scripts/verify_cross_agent.py`: logit-level probe proving agents share PAST
+  context (changing agent 1's past moves agent 0's logits) with no future / no
+  same-column leakage. Verified on real Qwen3-4B: check1 max|Δ|~9.2, checks 2&3 = 0.0.
+- Real Qwen3-4B weights live (gitignored) under `models/Qwen3-4B-Instruct-2507/`.
+- **Stage-2 data pipeline** (offline download + tokenize/convert): tiered blend
+  (structure: molweni, werewolf [no content loss]; breadth: meld,
+  conversation_chronicles; retention: qwen_distill self-distill). Turn-major
+  matrix conversion with rotated target-seat shifted content labels + EOS,
+  silence subsampling (`silence_loss_ratio`, decision-points-only), agent-row
+  permutation, `source_id` tagging. Code: `data/schema.py`, `data/adapters/*`,
+  `data/convert.py`, `data/manifest.py`, `data/build_dataset.py` (CLI
+  download|convert), `data/distill.py`; jobs `scripts/{download_data.sh,
+  distill_qwen.sbatch,preprocess_data.sbatch}`; training hooks
+  `training/multi_source.py` (weighted interleave, collate, per-source loss).
+  Config: `--processed_data_dir/--dataset_weights/--silence_token_id/
+  --drop_silence/--silence_loss_ratio/--silence_decision_points_only`. See
+  `data/dataset_plan.md`.
+- `tests/`: pytest suite (**50 tests**, 1 skipped without PEFT) across:
   - `test_matrix_shapes.py` -- shapes, variable agents, flatten/unflatten roundtrip.
   - `test_forward_backward.py` -- finite loss + agent-embedding grad norm > 0.
   - `test_position_ids.py` -- exact flat/column position-id values.
@@ -66,6 +113,14 @@ the final architecture.
   - `test_lora_freezing.py` -- freeze/unfreeze/LoRA (skips cleanly if no PEFT).
   - `test_config.py` -- str2bool, target-module parsing, arg validation.
   - `test_main_integration.py` -- end-to-end `main.main()` smoke + dry-run.
+  - `test_silence.py` -- silence mask blocks silent keys (keeps diagonal); a
+    fully-silent agent is invisible (== not present, column mode); speaking-agent
+    control confirms visibility; `drop_silence` compaction matches the masked
+    path at kept cells on a ragged batch.
+  - `test_convert.py` -- Stage-2 converter: turn-major shapes, shifted
+    target-seat content labels + EOS, structure-only sources carry no content
+    labels, silence subsampling honors `silence_loss_ratio`, permutation-invariant
+    content labeling, source tagging.
 
 ## 3. What is intentionally NOT implemented yet
 
@@ -167,6 +222,27 @@ Verified on Windows + Python 3.12 + torch 2.7.0+cpu + transformers 5.12.1 + peft
 4. Explore 2D / multi-axis RoPE.
 5. Build a minimal multi-agent environment (Werewolf/Avalon) for RL later.
 
+### Performance / scaling roadmap (planned, not yet implemented)
+
+- **KV cache + incremental matrix mask: DEFERRED to the online Werewolf/Avalon RL
+  stage.** Rationale: training is teacher-forced (the whole `A*T` matrix is one
+  forward/backward pass), so a KV cache gives ZERO training speedup -- it only
+  helps autoregressive token-by-token generation, which dominates cost during RL
+  rollouts. Build it then (silence/EOS-finished agents naturally drop out of the
+  cache). Current generation uses `use_cache=False` and recomputes the full
+  sequence each step (`O(N^2)`), which is fine for now.
+- **Training-phase perf levers (the ones that matter now):** SDPA attention
+  (our additive 4D mask is SDPA-compatible; faster than eager), silence
+  compaction (`drop_silence`), LoRA + selective freezing, gradient checkpointing,
+  and multi-GPU DDP.
+- **Multi-GPU training:** start with **LoRA + freeze most layers + DDP via HF
+  Accelerate** (gradients all-reduced/shared across GPUs; tiny trainable surface
+  fits a T4). Freeze the BOTTOM layers with NO adapters so backprop can stop at
+  the first trainable (top) layer -- to realize this, add `--lora_layers`
+  (PEFT `layers_to_transform`) so LoRA is confined to the top N layers. Use
+  FSDP/ZeRO only if full fine-tuning (V100/H100 nodes). Re-baseline on a GPU
+  before optimizing (CPU timings are misleading).
+
 ## 8. Rosie supercomputer (MSOE)
 
 This repo is intended to run on **Rosie**, MSOE's academic HPC cluster
@@ -226,6 +302,17 @@ squeue -u $USER                               # my jobs
 sinfo -o "%P %N %G"                           # partitions / nodes / GRES
 scancel <jobid>                               # cancel
 srun --account=undergrad_research --partition=teaching --gres=gpu:1 --pty bash  # interactive
+```
+
+### Interactive shell inside the MSOE Singularity container
+
+This is the working format for an interactive bash terminal on Rosie. `--nv`
+exposes the GPUs; `-B /data:/data` binds the shared share. Use `--gres=gpu:0`
+for a CPU-only shell, or `gpu:N` to request GPUs:
+
+```bash
+srun --pty --partition=teaching --gres=gpu:0 --cpus-per-task=4 --time=1-00:00:00 \
+  singularity shell --nv -B /data:/data /data/containers/msoe-tf2x.sif
 ```
 
 ## 9. Repo structure

@@ -19,6 +19,9 @@ logs/*.err
 checkpoints/run_*/
 checkpoints/**/*.pt
 
+# Local model downloads (e.g. Qwen3-4B pulled from the HF Hub)
+models/
+
 # Models / data
 *.bin
 *.safetensors

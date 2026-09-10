@@ -1,0 +1,46 @@
+---
+description: A "safe" V100 config (batch_size=1, max_flat_len<=1536, gradient_checkpointing=True) can still OOM hours into a run from CUDA memory fragmentation, not an oversized config
+alwaysApply: true
+---
+
+# V100 can OOM from progressive memory fragmentation, not just an oversized config
+
+Confirmed 2026-07-31: `aug2026_cand_00069` (lora_r=64, context_lookback_columns=128,
+gradient_accumulation_steps=16) OOM'd on a V100 after ~748 micro-batches /
+~30 minutes into a train_slice, **despite already having the correct
+V100-safe clamp** (`batch_size=1`, `max_flat_len=1536`,
+`gradient_checkpointing=True`, `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`
+already set both in `worker_pool_v100.sbatch` and passed explicitly by
+`worker.py`). This is not a clamp bug -- verify the clamp landed correctly
+before assuming otherwise, but don't stop there if it did.
+
+## Early-warning signature
+
+Per-iteration time climbs steadily right before the crash (this candidate's
+tqdm line went 12.8s/it -> 17s -> 22s -> 30s -> 40s -> 47s -> 56s -> 69s/it
+over its last ~8 steps) as PyTorch's allocator struggles to find contiguous
+free blocks. The final error is a normal `torch.OutOfMemoryError` at a
+routine allocation size (here, 4.09 GiB) with the GPU already ~96%+
+utilized -- not an attempt to allocate something huge.
+
+## What this means for monitoring
+
+- A candidate/arm failing with an OOM traceback well into a long run is NOT
+  automatically evidence that its hyperparameters are bad -- larger
+  `lora_r` (64) and longer `context_lookback_columns` (128/192) combos seem
+  more prone to this on V100's 32GB than on H100's 80GB, independent of the
+  actual turn-taking behavior the config produces. Don't let this silently
+  bias TPE away from a real result: the search's `_maybe_tell_bayes` still
+  reports a failure as score=0.0 to Optuna, which is reasonable as a
+  default but worth remembering is conflating "hyperparameters are bad" with
+  "this specific run hit a V100 fragmentation edge case" when reviewing why
+  a promising trial's family stopped appearing.
+- If a personally-managed DGX replica shares the same high-risk profile
+  (lora_r=64 + lookback128/192, long `gradient_accumulation_steps`), watch
+  its `.out` tqdm postfix for climbing `s/it` as an early-warning sign
+  before it actually crashes, and don't be surprised if it eventually OOMs
+  even though it looked fine for hours.
+- The controller/worker infrastructure already handles this failure
+  gracefully (marks the candidate `failed`, frees the slot, no crash to the
+  controller itself) -- no code fix is required per-occurrence, just don't
+  misdiagnose the cause when it happens.

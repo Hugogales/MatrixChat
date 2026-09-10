@@ -1,0 +1,120 @@
+---
+description: Recovering from a job crashing with "SyntaxError null bytes" on a file that reads clean
+alwaysApply: true
+---
+
+# A clean file can still crash a submitted job with "null bytes"
+
+Symptom: a Slurm job (or any process on a shared/NFS-backed filesystem)
+crashes instantly with something like:
+
+```
+File "/path/to/main.py", line N
+SyntaxError: source code cannot contain null bytes
+```
+
+...but reading the exact same file directly (from the login node, or even
+via `ssh` to the compute node) shows zero null bytes and parses fine with
+`ast.parse`. This happened once with `main.py` after a long editing session
+with multiple environment resets in between.
+
+This is a stale filesystem-level cache tied to the file's **old inode**
+(check `stat file.py` — the inode will look unremarkable, but a lower-level
+cache layer on the compute node or its NFS client is still serving old
+blocks). Editing the file in place does not fix it, and clearing
+`__pycache__` does not fix it either (that's the wrong layer).
+
+This has recurred more than once, on different files (`main.py` first, then
+`training/config.py` on 2026-08-02) — the common thread each time is a file
+edited once and then not touched by any subsequent job submission for a
+day or more before a fresh compute-node job tries to read it. Treat any
+first-launch-after-a-quiet-period `SyntaxError: ... null bytes` as this
+issue by default and apply the fix immediately, rather than assuming it is
+file-specific.
+
+## The same root cause has other symptoms besides literal null bytes
+
+Confirmed 2026-08-07: a large-scale incident (89 candidates false-failed
+across two live searches over more than 24 hours, `main.py`/
+`model/matrix_qwen.py`/`scripts/eval/turn_taking_probe.py` all affected on
+different compute nodes at different times) showed this same stale-NFS-cache
+root cause manifesting as THREE different symptoms, not just the literal
+"null bytes" message:
+
+- `SyntaxError: '(' was never closed` (or other nonsensical syntax errors)
+  at a line that is valid, correctly-closed code in the real file --
+  i.e. genuinely corrupted/truncated bytes served by a stale cache, just a
+  different corruption pattern than a literal null byte run.
+- `AttributeError: 'Namespace' object has no attribute 'some_removed_field'`
+  (or similarly "the current source could never produce this") where the
+  traceback's displayed source line (via `linecache`, which reads the LIVE
+  file) does not match what the error implies was actually executing --
+  this is stale **compiled bytecode** (a `__pycache__/*.pyc` whose embedded
+  source mtime/hash still matches what the compute node's NFS client
+  believes is the source file's current mtime, so Python trusts the cache
+  and never recompiles) rather than corrupted raw bytes. `grep` the
+  suspected removed/changed attribute name across the ENTIRE current
+  codebase first -- if it doesn't exist anywhere, the running code cannot
+  possibly be current source, confirming this diagnosis before treating it
+  as a real bug.
+- The problem is genuinely **node-specific and time-dependent, not global**:
+  the exact same file/inode ran correctly (including in this incident's own
+  smoke tests) on some compute nodes/time windows while failing on others
+  (e.g. H100 nodes were fine while a specific V100 node was not) -- a
+  successful smoke test on ONE node is not proof a file is safe everywhere;
+  don't stop investigating just because your own recent test passed.
+- Restarting a long-lived worker pool (to deploy an unrelated code fix, e.g.
+  a `worker.py` bugfix) can itself be what exposes a LATENT stale-cache
+  problem on a DIFFERENT file, by causing Slurm to reschedule onto a node
+  whose NFS client has a different (stale) cache state than the job it
+  replaced. Don't assume a fresh restart's failures are caused by the thing
+  you just changed -- check whether the actual traceback is from a
+  completely unrelated file first.
+- **Processed data and metadata can be affected too, not only Python
+  source.** Confirmed 2026-08-10: a previously healthy lookback-64
+  `manifest.json` became binary garbage (invalid UTF-8 and null bytes), and
+  reading the AMI Arrow shard returned impossible 64-bit `length` values
+  before the Python process segfaulted. A training process that had already
+  memory-mapped/loaded the dataset continued normally, so "current jobs are
+  healthy" did not prove the on-disk dataset remained reusable for a fresh
+  job. Before any final evaluation contract or new long-lived run, validate
+  the manifest as UTF-8 JSON and iterate every Arrow row checking
+  `length == len(input_ids[0])` plus expected matrix shapes. Do not attempt
+  to repair a corrupted Arrow shard by rewriting metadata derived from the
+  corrupted read.
+
+## Fix
+
+1. `Delete` the file, then `Write` it back with the exact same content
+   (verified against your last-known-good version first). This forces a
+   brand-new inode.
+2. Also delete any matching `__pycache__/<module>.cpython-*.pyc` next to it
+   locally (defensive -- doesn't fix the remote NFS cache by itself, but
+   removes one more place stale bytecode could be hiding).
+3. Verify the new inode: `stat file.py` before/after should show a
+   different `Inode:` number.
+4. Re-run tests / re-submit the job to confirm the fix actually worked
+   before moving on — don't assume it's fixed just because the rewrite
+   succeeded locally.
+5. **Check the blast radius before moving on.** If a search/worker pool has
+   been running against the broken file for a while, inspect its FULL
+   candidate failure history (not just whether jobs are currently RUNNING)
+   for the same error signature across every affected search directory --
+   this bug tends to hit multiple files and multiple searches in the same
+   window, not just the one you happened to notice first. Any candidate
+   failure caused by this must be retried (never counted as a real
+   hyperparameter result), and if it was already told to the search's
+   Optuna study as a false zero, treat it per
+   `.cursor/rules/search-worker-handled-failures.mdc` -- a small number of
+   early/random-phase false zeros can be left as a documented, contained
+   limitation, but if a large fraction of a study's real (non-import)
+   trials are contaminated, rebuild that study fresh (archive the old
+   `optuna_study.db`, clear `optuna_trial_number`/`optuna_told` on every
+   candidate without a genuinely valid score, backfill only from real
+   scores) rather than leaving a study that has no real signal left in it.
+6. For corrupted processed data, rebuild to a **new directory/inodes** from
+   raw source, validate every row and a real evaluation-contract build, then
+   preserve the old directory under a `.corrupted_<date>` name and
+   atomically rename the validated rebuild into the canonical path. Existing
+   processes with open mappings may continue, while new processes resolve
+   the repaired canonical path.

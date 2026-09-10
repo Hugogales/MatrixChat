@@ -1,8 +1,9 @@
 """Inspect processed MatrixChat shards (sanity-check the converter output).
 
 Prints the manifest summary and renders a few example matrices: each agent row
-as decoded tokens, with a label legend so you can eyeball that content labels sit
-on the target seat, silence labels are limited, and EOS lands at turn ends.
+as decoded tokens, with a label legend so you can eyeball that content labels
+sit on the target seat and activity labels correctly mark floor-taking,
+continuing, and stopping.
 
 Usage:
     python -m data.inspect --processed_dir /data/$USER/matrixchat/processed \
@@ -28,7 +29,6 @@ def parse_args(argv=None):
     p.add_argument("--source", type=str, default=None, help="Source to inspect (default: first in manifest).")
     p.add_argument("--num", type=int, default=2)
     p.add_argument("--model_path", type=str, default="models/Qwen3-4B-Instruct-2507")
-    p.add_argument("--silence_token_id", type=int, default=151669)
     p.add_argument("--layout", choices=["column", "row"], default="column",
                    help="column: time flows down, each agent is a column (reads like the "
                         "conversation). row: each agent is a row.")
@@ -41,17 +41,27 @@ def parse_args(argv=None):
     return p.parse_args(argv)
 
 
-def _cell(tok, tid, label, silence_id, width=None):
-    """Render one cell as 'token[mark]' where mark shows the label type."""
-    text = tok.decode([int(tid)]).replace("\n", "\\n").strip() or "_"
-    if int(tid) == silence_id:
-        text = "."
-    if label == -100:
-        mark = " "
-    elif int(label) == silence_id:
-        mark = "S"   # silence supervised
+def _cell(tok, tid, active, content_label, activity_label, width=None):
+    """Render one cell as 'token[mark]' where mark shows the label type.
+
+    Marks: ``*`` = content label (next-token target), ``^`` = activity label 1
+    (should speak next), ``.`` = activity label 0 (should yield next),
+    `` `` (blank) = both ignored. Inactive input cells render as ``·``.
+    """
+    if not active:
+        text = "\u00b7"
     else:
-        mark = "*"   # content label (next-token target)
+        text = tok.decode([int(tid)]).replace("\n", "\\n").strip() or "_"
+
+    if content_label is not None and content_label != -100:
+        mark = "*"
+    elif activity_label == 1:
+        mark = "^"
+    elif activity_label == 0:
+        mark = "."
+    else:
+        mark = " "
+
     cell = f"{text[:10]}[{mark}]"
     if width is not None:
         cell = cell[:width].ljust(width)
@@ -76,7 +86,9 @@ def main(argv=None):
 
     tok = AutoTokenizer.from_pretrained(args.model_path)
     ds = load_from_disk(os.path.join(args.processed_dir, source))
-    print(f"\n=== {source}: {len(ds)} examples ===  legend: [*]=content label  [S]=silence label  [ ]=ignore  '.'=silence input")
+    print(f"\n=== {source}: {len(ds)} examples ===  "
+          "legend: [*]=content label  [^]=activity:speak-next  [.]=activity:yield-next  "
+          "[ ]=ignore  '\u00b7'=inactive input")
 
     indices = [args.index] if args.index is not None else range(len(ds))
     shown = 0
@@ -85,6 +97,7 @@ def main(argv=None):
             break
         ex = ds[i]
         ii, lb = ex["input_ids"], ex["labels"]
+        mask, al = ex["input_activity_mask"], ex["activity_labels"]
         A, T = len(ii), ex["length"]
         if args.index is None and A < args.min_agents:
             continue
@@ -94,7 +107,9 @@ def main(argv=None):
 
         if args.layout == "row":
             for a in range(A):
-                cells = " ".join(_cell(tok, ii[a][t], lb[a][t], args.silence_token_id) for t in range(steps))
+                cells = " ".join(
+                    _cell(tok, ii[a][t], mask[a][t], lb[a][t], al[a][t]) for t in range(steps)
+                )
                 print(f"  agent {a}: {cells}")
             continue
 
@@ -104,7 +119,9 @@ def main(argv=None):
         print(header)
         print("  " + "-" * (len(header) - 2))
         for t in range(steps):
-            row = " | ".join(_cell(tok, ii[a][t], lb[a][t], args.silence_token_id, width=w) for a in range(A))
+            row = " | ".join(
+                _cell(tok, ii[a][t], mask[a][t], lb[a][t], al[a][t], width=w) for a in range(A)
+            )
             print(f"  {t:>3} | {row}")
 
 

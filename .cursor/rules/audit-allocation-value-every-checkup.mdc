@@ -1,0 +1,50 @@
+---
+description: Every checkup must ask whether running jobs are still worth their GPU cost, not just whether they're healthy
+alwaysApply: true
+---
+
+# "Healthy and running" is not the same question as "still worth the GPU"
+
+User feedback (08-10): after being asked "are the H100 jobs actually useful,
+or should we spawn something new instead," the honest answer required
+digging (checking GPU utilization, search `created_at`/`updated_at`,
+candidate throughput, best-score recency) that had not been done
+proactively — the standing hourly/six-hour checkups had been verifying
+"RUNNING, no traceback, failure counts flat" without also asking "is this
+still the best use of this GPU budget right now?" User's guidance: ask this
+question more often, not just when directly prompted.
+
+## The distinction
+
+- **Health check** (already routine): is it RUNNING, traceback-free, still
+  making progress, GPU utilization nonzero?
+- **Value check** (the one that was missing): given everything learned so
+  far, is this specific allocation still the best use of these GPUs, or
+  would reallocating to a new idea/search produce more information per GPU-
+  hour? A job can pass every health check while being a worse use of the
+  budget than something else that could run instead.
+
+## Practice going forward
+
+Every routine checkup (hourly and six-hour, not just on-demand
+reallocation reviews) should explicitly ask, for each major
+allocation/search/long-running job:
+
+1. When did it last produce a genuinely new result (new best score, new
+   finding), not just a heartbeat? A search with a fresh best-score is
+   earning its GPUs; one that hasn't moved in many hours/candidates despite
+   running fine is a candidate for reallocation, not just monitoring.
+2. Is there queued/pending work (manual arms, a new search, a promising
+   candidate) that a freed GPU would immediately put to better use than
+   the status quo?
+3. If the honest answer to "would I launch this specific allocation again
+   today, knowing what we know now" is no, say so and propose a
+   reallocation — don't wait for the user to ask the value question
+   directly.
+
+This does not mean reallocating reflexively — an actively-improving search
+(fresh best score, real GPU utilization, active heartbeat) is a good use of
+its budget and should be left alone. The failure mode to avoid is treating
+"still running, still healthy" as sufficient justification without also
+checking whether it's still the best-value use of scarce, fully-committed
+GPU capacity.

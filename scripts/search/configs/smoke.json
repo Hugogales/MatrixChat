@@ -1,0 +1,21 @@
+{
+  "rungs": [
+    {"target_steps": 20, "priority": 100},
+    {"target_steps": 40, "priority": 200}
+  ],
+  "initial_candidates": 2,
+  "target_active_candidates": 2,
+  "max_candidates": 4,
+  "train_slice_minutes": 25,
+  "probe_every": 10,
+  "eval_max_new_tokens": 8,
+  "promotion_fraction": 0.5,
+  "min_rung_population": 2,
+  "search_seed": 20260729,
+  "candidate_prefix": "smoke_main",
+  "judge_enabled": true,
+  "judge_model": "meta/llama-4-scout-17b-16e-instruct",
+  "judge_trials_by_rung": [2, 4],
+  "require_calibrated_judge": false,
+  "strategist_enabled": false
+}

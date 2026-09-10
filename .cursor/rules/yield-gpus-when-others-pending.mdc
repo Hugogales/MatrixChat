@@ -1,0 +1,53 @@
+---
+description: Vacate DGX/H100 GPUs when other users have pending jobs; full-node memory requests need a fully empty node
+alwaysApply: true
+---
+
+# Yield GPUs when other people try to run
+
+User instruction (08-16): do not keep the final-run fleet saturating
+`dgx` / `dgxh100` if another user is pending. Occupying every GPU is fine
+only while the partitions are otherwise empty. The moment someone else
+tries to run, free what they need — do not wait for the user to ask.
+
+## What to inspect
+
+Every hourly/six-hour checkup (and any "how is it going") must run
+`squeue -p dgx,dgxh100` for **other users**, not just our jobs. For each
+foreign pending job, read `scontrol show job <id>` `ReqTRES`:
+
+- **1 GPU + modest mem** (~56G or less): cancel the lowest-sunk-cost
+  running job(s) on that partition (newest / fewest steps / not mid
+  60-example screen). One idle GPU is enough.
+- **mem near a node's `CfgTRES` mem** (DGX V100 nodes are ~489907M):
+  they cannot start while every node still has any of our allocations.
+  Vacate **entire node(s)** — one empty node per such job. Individual
+  idle GPUs do not help. This is the 08-04 MATLAB/OOD failure mode.
+- **H100 pending**: same logic on `dh-dgxh100-1` only.
+
+## How to vacate without immediately re-filling
+
+1. `scontrol hold` every pending job of ours that could start
+   (`Priority` / `Resources`, not `Dependency`). Otherwise our queued
+   evals steal the hole before the other user schedules (they often have
+   lower `Priority`).
+2. Cancel the chosen running jobs. Prefer the node whose trains have
+   the least sunk cost (newest wave / lowest step). Do **not** cancel a
+   wave that is minutes from step 500/1500 or a 60-example screen that
+   is almost finished if another node can be vacated instead.
+3. Also cancel that wave's dependent evals so `afterok` leftovers do
+   not refill the node.
+4. Watch until the other user's job is `RUNNING` (or they drop). Keep
+   the holds until then. Do not launch replacements onto the vacated
+   node while they are still pending or running.
+5. After they finish, `scontrol release` the holds and refill only
+   leftover idle GPUs. Resume cancelled screens into the same output
+   dirs when the eval script supports resume.
+
+## What not to do
+
+- Do not keep a full 24/8 allocation out of "search momentum" while a
+  faculty/OOD job sits in `Priority`/`Resources`.
+- Do not report "someone is pending" and leave the fleet untouched.
+- Do not vacate H100s for a `dgx`-only request, or V100s for an
+  H100-only request.

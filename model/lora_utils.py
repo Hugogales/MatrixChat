@@ -1,7 +1,8 @@
 """LoRA and parameter-freezing utilities for MatrixChat.
 
-The matrix-interface parameters (agent embeddings, optional channel embeddings)
-must remain trainable even when the base model is frozen.
+The matrix-interface parameters (agent embeddings, optional channel embeddings,
+the inactive-cell embedding, and the activity head) must remain trainable even
+when the base model is frozen.
 """
 
 from __future__ import annotations
@@ -11,7 +12,14 @@ import torch.nn as nn
 
 def _matrix_interface_modules(model: nn.Module):
     """Yield the wrapper's own (non-base) trainable modules."""
-    for name in ("agent_embeddings", "channel_embeddings", "silence_embedding"):
+    for name in (
+        "agent_embeddings",
+        "agent_attention",
+        "agent_same_attention_bias",
+        "channel_embeddings",
+        "inactive_embedding",
+        "activity_head",
+    ):
         module = getattr(model, name, None)
         if module is not None:
             yield module

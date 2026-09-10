@@ -1,0 +1,67 @@
+---
+description: Widening batch_size/max_flat_len search space for a high-memory GPU (e.g. H100) without re-validating memory safety
+alwaysApply: true
+---
+
+# Extra GPU memory does not scale linearly with sequence length under eager attention
+
+This project's model (`transformers`' Qwen3 loaded without an explicit
+`attn_implementation` override) uses **eager attention**, whose memory cost
+is quadratic in the flattened sequence length (`max_flat_len`), not linear.
+An 80GB H100 has ~2.5x a 32GB V100's memory, but that only buys roughly
+`sqrt(2.5)` ≈ 1.6x more safe sequence length at the same batch size, not
+2.5x -- and batch_size and max_flat_len multiply together, so increasing
+both at once compounds fast.
+
+## What happened (2026-08-04)
+
+A newly-launched H100 search widened `batch_size_choices` to `[2,4,6,8]`
+and `max_flat_len_choices` to `[3072,4096,6144]`, and only forced
+`gradient_checkpointing` at `batch_size>=8` (reasoning from raw GPU memory
+headroom alone). Result: **22 of the first 22 real candidates OOM'd**,
+including the *smallest* new combination tried
+(`batch_size=2, max_flat_len=3072, no checkpointing`).
+
+## 2nd correction, same day: checkpointing is not always enough
+
+Forcing `gradient_checkpointing=True` fixed the 22/22 failure rate above,
+but `batch_size=8, max_flat_len=4096` (checkpointed) still intermittently
+OOM'd -- one candidate completed ~500 steps, an identically-configured one
+OOM'd at step ~456 with only 296MiB free out of 79.18GB. Checkpointing
+avoids retaining per-layer activations across the whole forward pass, but
+does not lower a combination's *steady-state* working set below ~99.6% GPU
+utilization -- there was never real margin for normal run-to-run variance
+(different batches have different actual token counts within the
+`max_flat_len` cap). Fix: cap `max_flat_len` at 2048 once `batch_size`
+reaches 8, even with checkpointing already forced on. **One candidate
+succeeding is not sufficient evidence a combination is safe** -- prefer
+observing several successful full-length runs (not just one smoke test)
+before trusting a combination that's already close to the memory ceiling.
+
+## Fix and standing lesson
+
+- Any `max_flat_len` beyond the previously-validated ~2048 ceiling, or any
+  `batch_size >= 4`, must force `gradient_checkpointing=True` on this
+  model regardless of how much raw GPU memory is available -- checkpointing
+  avoids retaining the O(seq_len^2) attention-weight tensor across the
+  whole forward pass, which is the actual memory bottleneck, not raw
+  parameter/activation storage.
+- **Before trusting a widened search space with real compute, smoke-test
+  the riskiest single combination directly** (a short, ~5-step `main.py`
+  invocation is enough) rather than reasoning from memory math alone --
+  eager attention's actual behavior is not intuitive from "GPU has more
+  RAM" logic.
+- If a long-lived controller process already has bad values baked into
+  the ON-DISK `search_state.json`'s `config` (not just the `--config`
+  file passed at launch), restarting the controller does NOT pick up a
+  corrected config file: `read_json(paths.state) or initial_state(config)`
+  only calls `initial_state` (which would read the fresh config) if the
+  state file doesn't exist yet. If it already exists, the freshly-loaded
+  `--config` is silently ignored. Patch `search_state.json`'s embedded
+  `config` dict directly in this case.
+- Also check for a stale `controller.lock`/`watchdog.lock` (and fresh-looking
+  `controller_lease.json` heartbeat) left behind by a process you just
+  killed -- restarting within the lease window (default 600s) will make the
+  new process think another instance is still alive and refuse to start.
+  Release the lock directory manually if you're certain the old process is
+  dead.

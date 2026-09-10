@@ -1,0 +1,44 @@
+---
+description: Always read actual decoded probe text before judging a checkpoint as "healthy" or "best" -- aggregate loss/accuracy/repetition metrics can be gamed by degenerate behavior they don't catch.
+alwaysApply: true
+---
+
+# Read the decoded text, not just the metrics
+
+Low `val_loss`, high `activity_accuracy`, and normal `repeated_4gram_fraction`
+do NOT prove a checkpoint's turn-taking behavior is actually good. Reward/loss
+hacking is real here: a model can satisfy every aggregate metric while still
+producing degenerate output that a human would immediately recognize as
+useless. Confirmed concrete examples from this project (see
+`SUCCESS_STORIES.md`'s "Methodological warning" section):
+
+- **Near-echo "overlap"** that scores `listener_spoke=True` / `overlap=True`
+  (looks like progress) but is really one agent parroting the other's phrase
+  back near-verbatim at the same time, not an independent contribution.
+- **Self-repetition loops** within one agent's own turn (e.g. "I agree. I
+  agree. I agree. I agree.") that don't move `repeated_4gram_fraction` enough
+  to look elevated.
+- **Cross-source vocabulary leakage** (e.g. Werewolf game terms like "seer"
+  appearing on an unrelated MELD-style prompt) that doesn't affect
+  `content_loss` much since it's still fluent, on-distribution text.
+- **Literal repeated-token spam** ("[laughter] [laughter] [laughter]...").
+
+None of these trip the collapse detectors (activity_accuracy crash,
+repeated_4gram_fraction spike) that have caught OTHER failure modes earlier in
+this project. They are a different, more insidious quality problem.
+
+## Required practice for every checkup / arm evaluation going forward
+
+Before calling any checkpoint "healthy," "the best so far," or ready to keep
+training over another candidate:
+
+1. Pull its `checkpoint_probe_latest.json` (or equivalent) and read at least
+   4-6 actual `outputs` entries, not just the summary rates.
+2. Specifically check for: near-verbatim echo between agents, in-turn
+   self-repetition, off-topic vocabulary leakage from another source, and
+   token-spam.
+3. If a "good numbers" checkpoint turns out to be qualitatively degenerate,
+   say so explicitly and do not rank it above a qualitatively-cleaner
+   checkpoint just because its loss is lower.
+4. When comparing multiple arms, prefer citing 1-2 concrete decoded examples
+   over restating aggregate numbers alone.

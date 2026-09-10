@@ -44,6 +44,7 @@ def update_source(
     default_weight: float,
     rel_path: str,
     token_stats: Dict | None = None,
+    conversion_config: Dict | None = None,
 ) -> Dict:
     """Insert/replace one source's entry and persist the manifest."""
     manifest = load_manifest(processed_dir)
@@ -54,6 +55,7 @@ def update_source(
         "default_weight": default_weight,
         "path": rel_path,
         "token_stats": token_stats or {},
+        "conversion_config": conversion_config or {},
     }
     save_manifest(processed_dir, manifest)
     return manifest

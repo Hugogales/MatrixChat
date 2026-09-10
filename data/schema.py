@@ -20,12 +20,34 @@ ROLE_PEER = "peer"
 
 
 @dataclass
+class TimedWord:
+    """A transcript terminal aligned to wall-clock time in seconds."""
+
+    text: str
+    start_time: float
+    end_time: float
+    is_punctuation: bool = False
+    meta: dict = field(default_factory=dict)
+
+
+@dataclass
 class Turn:
     """A single utterance by one speaker."""
 
     speaker: int            # index into Conversation.speakers
     text: str
     role: str = ROLE_PEER   # one of the ROLE_* constants
+    start_time: Optional[float] = None
+    end_time: Optional[float] = None
+    timed_words: List[TimedWord] = field(default_factory=list)
+    meta: dict = field(default_factory=dict)
+    # Extra speaker indices (into Conversation.speakers) allowed to view this
+    # turn's cells, beyond the speaker itself. None = public (default; every
+    # existing source). A non-None value marks the turn PRIVATE: the converter
+    # will still place its tokens as normal active cells on the speaker's row,
+    # but the attention mask will block any agent not in this list (plus the
+    # speaker) from attending to those cells as keys.
+    visible_to: Optional[List[int]] = None
 
 
 @dataclass

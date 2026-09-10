@@ -49,7 +49,15 @@ def make_toy_matrix_batch(
     random target tokens. All other label positions are ``-100`` (ignored). This
     exercises "predict the next token for every agent at once".
 
-    Returns ``(input_ids, labels)`` each shaped ``[B, A, T]``.
+    Every cell is marked ACTIVE (``input_activity_mask`` all ``True``) -- the toy
+    batch has no notion of turn-taking, so "everyone always speaks" is the only
+    self-consistent pattern. ``activity_labels`` mirror that: every agent is
+    labeled active-next except the last column (no successor, ``-100``). This is
+    a degenerate but valid pattern that still exercises the activity BCE and
+    turn-taking reward code paths in the toy smoke test, not just content CE.
+
+    Returns ``(input_ids, labels, input_activity_mask, activity_labels)`` each
+    shaped ``[B, A, T]``.
     """
     device = device or torch.device("cpu")
 
@@ -67,4 +75,12 @@ def make_toy_matrix_batch(
     )
     labels[:, :, -1] = target
 
-    return input_ids, labels
+    input_activity_mask = torch.ones(
+        (batch_size, num_agents, seq_len), dtype=torch.bool, device=device
+    )
+    activity_labels = torch.ones(
+        (batch_size, num_agents, seq_len), dtype=torch.long, device=device
+    )
+    activity_labels[:, :, -1] = -100
+
+    return input_ids, labels, input_activity_mask, activity_labels

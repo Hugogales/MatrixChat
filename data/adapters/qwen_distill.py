@@ -1,6 +1,6 @@
 """Self-distilled Qwen adapter (knowledge/behavior retention anchor).
 
-Produced by ``scripts/distill_qwen.sbatch``: run Qwen3-4B on prompts and store
+Produced by ``scripts/data_prep/distill_qwen.sbatch``: run Qwen3-4B on prompts and store
 its own responses. Training MatrixQwen to reproduce these through the matrix
 interface preserves Qwen's general behavior (anti-forgetting). Content-bearing,
 with the assistant turn as the natural target seat.

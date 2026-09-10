@@ -1,0 +1,26 @@
+---
+description: Search workers can remain RUNNING while every candidate evaluation fails
+alwaysApply: true
+---
+
+# A healthy Slurm worker pool does not imply a healthy search
+
+`scripts/search/worker.py` catches ticket exceptions and publishes error
+results so one bad candidate does not kill the long-lived worker. Therefore:
+
+- zero tracebacks in the worker-pool `.err`;
+- a `RUNNING` worker-pool job; and
+- a steadily increasing queue result count
+
+can all coexist with every candidate failing.
+
+Every search checkup must inspect the canonical candidate status/failure
+distribution in `search_state.json`, especially recent candidates. A sudden
+rise in `failed` or the same error repeated across candidates is an
+infrastructure bug until proven otherwise, not evidence that all sampled
+hyperparameters are bad.
+
+Broad-evaluation infrastructure failures must be retried and must not be
+reported to Optuna as objective value `0.0`. If such false zeros were already
+told, archive the contaminated study and rebuild a fresh study seeded only
+from valid scored candidates.

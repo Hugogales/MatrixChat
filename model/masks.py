@@ -21,7 +21,9 @@ def build_matrix_causal_mask(
     device,
     dtype: torch.dtype = torch.float32,
     allow_same_column: bool = False,
-    silence_mask: "torch.Tensor | None" = None,
+    inactive_mask: "torch.Tensor | None" = None,
+    private_mask: "torch.Tensor | None" = None,
+    agent_visibility: "torch.Tensor | None" = None,
 ) -> torch.Tensor:
     """Build an additive matrix-causal attention mask.
 
@@ -42,16 +44,45 @@ def build_matrix_causal_mask(
     future tokens) and leaks future information forward. Allowing the diagonal
     keeps every row well-defined and fully causal.
 
-    Silence (invisible cells)
-    -------------------------
-    ``silence_mask`` is an optional boolean tensor of shape ``[batch_size, S]``
-    (column-major flattened, ``True`` where a cell is silent). A silent cell is
-    made **invisible**: no query may attend to it as a *key*, so other agents
-    cannot see a silent agent's slot at all. The only exception is the diagonal
-    (a silent cell may still attend to itself) so its own softmax row stays
-    well-defined and never degenerates -- its output logits are simply discarded
-    by the caller. Note this also hides a silent cell from the *same* agent's
-    later columns, since a silence slot carries no token information.
+    Inactive cells (invisible)
+    ---------------------------
+    ``inactive_mask`` is an optional boolean tensor of shape ``[batch_size, S]``
+    (column-major flattened, ``True`` where a cell is inactive/yielding -- i.e.
+    ``input_activity_mask`` inverted). An inactive cell is made **invisible**: no
+    query may attend to it as a *key*, so other agents cannot see an inactive
+    agent's slot at all. The only exception is the diagonal (an inactive cell may
+    still attend to itself) so its own softmax row stays well-defined and never
+    degenerates -- its output logits are simply discarded by the caller. Note
+    this also hides an inactive cell from the *same* agent's later columns, since
+    an inactive slot carries no token information.
+
+    Private cells (per-agent visibility ACL)
+    -----------------------------------------
+    ``private_mask`` is an optional boolean tensor of shape ``[batch_size, S]``
+    (column-major flattened, ``True`` where that cell belongs to a PRIVATE turn
+    -- see ``data.schema.Turn.visible_to``). ``agent_visibility`` is an optional
+    boolean tensor of shape ``[batch_size, num_agents, num_agents]`` where
+    ``agent_visibility[b, owner, viewer]`` is ``True`` iff agent ``viewer`` may
+    attend to agent ``owner``'s private cells (the diagonal -- an agent viewing
+    its own private cells -- should always be ``True``).
+
+    A private key cell is blocked for any query whose agent is not permitted by
+    ``agent_visibility``; public cells (``private_mask[k] == False``) are
+    completely unaffected by this mechanism, exactly like the existing
+    ``inactive_mask`` blocking, this exception is on top of (not instead of)
+    the causal/inactive rules above -- a private cell can still be invisible for
+    ordinary causal/inactive reasons even to a permitted viewer.
+
+    This guarantees no agent can attend DIRECTLY to another agent's private
+    cells. It deliberately does NOT (and cannot, without hiding the speaker's
+    entire subsequent identity) prevent an unauthorized viewer from later
+    observing the OWNER's own public speech, even though that speech's hidden
+    states were computed from context that includes the owner's own private
+    cells (an owner always sees its own past, private or not). That is exactly
+    how information asymmetry should work in a social-deduction setting: your
+    role card itself is unreadable to others, but your subsequent public
+    behavior -- which your role legitimately informs -- is fair game to
+    observe and reason about. Verified in ``tests/test_masks.py``.
 
     Allowed positions are ``0.0``; disallowed positions are a large negative
     value (``-1e4`` for fp16/bf16 safety, otherwise ``finfo.min``).
@@ -83,69 +114,62 @@ def build_matrix_causal_mask(
         neg = torch.tensor(torch.finfo(dtype).min, dtype=dtype, device=device)
     zero = torch.tensor(0.0, dtype=dtype, device=device)
 
-    if silence_mask is None:
+    if inactive_mask is None and private_mask is None:
         mask_2d = torch.where(base_allowed, zero, neg)  # [S, S]
         return mask_2d.view(1, 1, seq, seq).expand(batch_size, 1, seq, seq).contiguous()
 
-    # Per-batch: block any key that is a silent cell, except the diagonal.
+    # Per-batch: block any key that is an inactive cell, except the diagonal.
     diag = torch.eye(seq, dtype=torch.bool, device=device)              # [S, S]
-    key_silent = silence_mask.to(torch.bool).to(device).view(batch_size, 1, seq)  # [B, 1, S]
-    block_silent = key_silent & (~diag).unsqueeze(0)                    # [B, S, S]
-    allowed = base_allowed.unsqueeze(0) & (~block_silent)              # [B, S, S]
-    mask_2d = torch.where(allowed, zero, neg)                          # [B, S, S]
+    allowed = base_allowed.unsqueeze(0).expand(batch_size, seq, seq)    # [B, S, S]
+
+    if inactive_mask is not None:
+        key_inactive = inactive_mask.to(torch.bool).to(device).view(batch_size, 1, seq)  # [B, 1, S]
+        block_inactive = key_inactive & (~diag).unsqueeze(0)             # [B, S, S]
+        allowed = allowed & (~block_inactive)
+
+    if private_mask is not None and agent_visibility is not None:
+        key_private = private_mask.to(torch.bool).to(device).view(batch_size, 1, seq)  # [B, 1, S]
+        vis = agent_visibility.to(torch.bool).to(device)                # [B, A, A]
+        owner_idx = ak.expand(seq, seq)                                  # [Sq, Sk] -> key's agent
+        viewer_idx = aq.expand(seq, seq)                                 # [Sq, Sk] -> query's agent
+        vis_qk = vis[:, owner_idx, viewer_idx]                           # [B, Sq, Sk]
+        block_private = key_private & (~vis_qk) & (~diag).unsqueeze(0)   # never block self
+        allowed = allowed & (~block_private)
+
+    mask_2d = torch.where(allowed, zero, neg)                           # [B, S, S]
     return mask_2d.view(batch_size, 1, seq, seq).contiguous()
 
 
-def build_matrix_mask_from_coords(
-    time: torch.Tensor,
-    agent: torch.Tensor,
-    valid: torch.Tensor,
+def build_matrix_causal_mask_new_column_queries(
+    batch_size: int,
+    num_agents: int,
+    seq_len: int,
+    device,
     dtype: torch.dtype = torch.float32,
     allow_same_column: bool = False,
+    inactive_mask: "torch.Tensor | None" = None,
+    private_mask: "torch.Tensor | None" = None,
+    agent_visibility: "torch.Tensor | None" = None,
 ) -> torch.Tensor:
-    """Build an additive matrix-causal mask from explicit per-token coordinates.
+    """Attention mask for only the newest column's query rows.
 
-    Unlike :func:`build_matrix_causal_mask`, this does NOT assume a dense
-    rectangular ``A*T`` layout. It is used by the silence-dropping (compaction)
-    path, where each batch element keeps a different subset of cells padded to a
-    common length ``L``.
-
-    Parameters
-    ----------
-    time, agent:
-        Long tensors ``[B, L]`` giving each (possibly compacted) token's original
-        time column and agent row.
-    valid:
-        Bool tensor ``[B, L]``; ``True`` for real tokens, ``False`` for padding.
-        Padding cells are blocked as keys (so nothing attends to them) but the
-        diagonal is always kept so every query row is well-defined.
-    allow_same_column:
-        Same semantics as :func:`build_matrix_causal_mask`.
-
-    Returns an additive mask ``[B, 1, L, L]``.
+    Returns ``[B, 1, num_agents, num_agents * seq_len]`` -- the last
+    ``num_agents`` query rows of the full matrix-causal mask at ``seq_len``.
+    Used by incremental KV-cache generation to avoid rebuilding the full
+    ``S x S`` mask on every column step.
     """
-    batch_size, length = time.shape
-    device = time.device
-
-    tq = time.unsqueeze(2)   # [B, L, 1]
-    tk = time.unsqueeze(1)   # [B, 1, L]
-    aq = agent.unsqueeze(2)
-    ak = agent.unsqueeze(1)
-
-    if allow_same_column:
-        base = tk <= tq
-    else:
-        base = (tk < tq) | ((tk == tq) & (ak == aq))
-
-    key_valid = valid.to(torch.bool).unsqueeze(1)                       # [B, 1, L]
-    diag = torch.eye(length, dtype=torch.bool, device=device).unsqueeze(0)  # [1, L, L]
-    allowed = (base & key_valid) | diag                                # [B, L, L]
-
-    if dtype in (torch.float16, torch.bfloat16):
-        neg = torch.tensor(-1e4, dtype=dtype, device=device)
-    else:
-        neg = torch.tensor(torch.finfo(dtype).min, dtype=dtype, device=device)
-    zero = torch.tensor(0.0, dtype=dtype, device=device)
-
-    mask_2d = torch.where(allowed, zero, neg)                          # [B, L, L]
-    return mask_2d.view(batch_size, 1, length, length).contiguous()
+    if seq_len < 1:
+        raise ValueError("seq_len must be at least 1")
+    full = build_matrix_causal_mask(
+        batch_size=batch_size,
+        num_agents=num_agents,
+        seq_len=seq_len,
+        device=device,
+        dtype=dtype,
+        allow_same_column=allow_same_column,
+        inactive_mask=inactive_mask,
+        private_mask=private_mask,
+        agent_visibility=agent_visibility,
+    )
+    flat = num_agents * seq_len
+    return full[:, :, flat - num_agents : flat, :]

@@ -1,0 +1,84 @@
+---
+description: Verify sbatch env-var overrides actually take effect before trusting a run
+globs: scripts/*.sbatch
+alwaysApply: false
+---
+
+# sbatch scripts: hardcoded vars silently swallow env overrides
+
+`scripts/train_meld_ami_werewolf.sbatch` (and similar sbatch scripts) mix two
+patterns for the same-looking assignment:
+
+```bash
+LEARNING_RATE="${LEARNING_RATE:-1e-4}"   # overridable from the environment
+SPEAK_GRACE=50                            # NOT overridable -- always 50
+```
+
+Passing `SPEAK_GRACE=5 sbatch ...` for the second pattern does **nothing**:
+bash just clobbers the exported env var with the hardcoded literal, with no
+error, no warning, and a normal-looking successful job submission. This
+already happened once (four jobs quietly re-ran with default
+speak/silence-decay params instead of the intended steepened ones — caught
+only by grepping the script before trusting the launch).
+
+## Before submitting a job with new/unusual env-var overrides
+
+1. `grep -n '^VARNAME=' the.sbatch` for every variable you intend to
+   override. If it's a bare literal (no `${VARNAME:-default}`), fix it to
+   the overridable pattern first.
+2. After submission, verify the override actually landed by reading the
+   saved `hyperparameters/<run_name>.json` (or equivalent) — don't just
+   trust that the job started without error.
+3. If you find and fix a hardcoded var, sweep the whole script for the same
+   pattern in one pass rather than fixing one variable at a time.
+
+## `sbatch --export=...` silently truncates values containing commas
+
+`sbatch --export=ALL,VAR1=foo,VAR2="a,b,c",VAR3=bar` does **not** respect the
+quotes around `VAR2`'s value — Slurm's `--export` parser splits on every
+comma regardless of quoting, so `VAR2` silently becomes `"a"` and `b`/`c` get
+misinterpreted as their own bogus `KEY=VALUE` pairs (or dropped). This
+already happened once with `DATASET_WEIGHTS="meld=0.15,ami=0.50,werewolf=0.35"`
+passed inline in `--export=...`: the job silently trained on `{'meld': 1.0}`
+(single-source) instead of the intended 3-way mix, with no error and a
+normal-looking job start (caught only by grepping the job's own stdout for
+the `training sources/weights:` line before trusting it).
+
+**Fix**: for any override value containing a comma, `export` it in the
+submitting shell *first*, then use plain `--export=ALL` (or `--export=ALL,...`
+for the other, comma-free overrides) so Slurm forwards the shell's own env
+var verbatim instead of re-parsing it:
+
+```bash
+export DATASET_WEIGHTS="meld=0.15,ami=0.50,werewolf=0.35"
+sbatch --export=ALL,RUN_NAME=foo,SEED=1 scripts/training/train_meld_ami_werewolf.sbatch
+```
+
+Never pass a comma-containing value inline inside `--export=...,VAR="a,b,c",...`.
+After submission, always verify by grepping the job's stdout for the actual
+resolved value (e.g. `training sources/weights:`), not just the saved
+hyperparameters JSON — a truncated env var can still round-trip through
+argparse into a JSON file that looks plausible at a glance.
+
+## `export VAR=...` in the agent's own shell silently leaks into ALL later `--export=ALL` launches
+
+The agent's shell session persists env vars across every subsequent Shell
+tool call in the conversation. `export DATASET_WEIGHTS=...` done once (e.g.
+to work around the comma-splitting bug above for one specific launch) stays
+set for **every later `sbatch --export=ALL,...` call**, even ones for a
+completely different candidate/recipe that never intended to override it —
+`--export=ALL` forwards the whole current shell environment, not just the
+inline `KEY=VALUE` pairs on that command line.
+
+Confirmed 2026-07-31: exporting `DATASET_WEIGHTS="meld=0.15,ami=0.50,werewolf=0.35"`
+for one launch (which needed it) silently leaked into 3 unrelated later
+launches (which needed the sbatch default equal-thirds mix instead) across
+several hours of real GPU training before being caught by re-verifying
+stdout during an unrelated audit — an easy, expensive, and silent mistake.
+
+**Fix**: `unset DATASET_WEIGHTS` (or any other comma-containing override)
+immediately after the launch that needed it, and/or explicitly `unset` it
+right before any subsequent launch that should use the sbatch script's own
+default. Do not assume "I didn't pass it this time" is enough — verify via
+the job's own stdout (`training sources/weights:`) every single time, not
+just for launches that intentionally set an override.

@@ -1,0 +1,47 @@
+---
+description: Final-run evaluation contract (no hard deadline -- quality-driven, not date-driven)
+alwaysApply: true
+---
+
+# Final-run evaluation contract
+
+User correction (08-27): there is **no hard deadline** for this project. An
+earlier instruction (08-11) set a 2-day exploration window ending 08-13,
+after which "final runs" would start -- that date came and went while
+exploration continued productively (encoding redesign, reward redesign, new
+data sources, LLM-judge rearchitecture), and the user has explicitly said
+not to frame decisions around it. **The operating goal is simply the best,
+most conversational model with the cleanest handoffs -- optimize for
+quality, not a calendar date.**
+
+The final-run evaluation contract itself (what "final runs" means once
+launched) is still the agreed methodology, and its tooling already exists
+and is tested (`scripts/final_runs/`, see `tests/scripts/test_final_runs.py`
+-- built 08-17, last updated 08-26):
+
+1. Split each dataset into train/test.
+2. Train only on the train split.
+3. Periodically evaluate the held-out test split: cut each test example in
+   half, seed the model with the first half (teacher-forced context), then
+   run **unrestricted** (autoregressive) generation for the remainder.
+4. Measure metrics separately for the human-authored half and the
+   LLM-generated half of each continuation.
+5. Output raw paired data (human vs. generated, per example), plots,
+   summary statistics, and statistical significance tests comparing the two.
+
+## What this means going forward
+
+- Do not invoke a deadline, "days remaining," or "converge by X date" framing
+  in checkups or planning -- that language was explicitly corrected by the
+  user on 08-27. If weighing "keep exploring vs. move to final runs," decide
+  on evidence quality (is the current leading config genuinely well-verified
+  per `.cursor/rules/read-decoded-text-not-just-metrics.mdc` and broad-swept
+  per `SUCCESS_STORIES.md`'s standing bar) and marginal value of more search
+  (per `.cursor/rules/audit-allocation-value-every-checkup.mdc`), not time
+  pressure.
+- Launching final runs and continuing exploration/HPO are not mutually
+  exclusive -- both can run concurrently under the GPU budget if there's
+  still open, high-value exploration worth pursuing alongside a final run
+  using the current best-known config.
+- The final-run evaluation script is ready to use whenever a config is
+  judged ready to commit to -- there is no remaining infrastructure blocker.

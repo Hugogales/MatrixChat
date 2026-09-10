@@ -1,0 +1,44 @@
+---
+description: dh-dgx1-1 has shown a reproducible CUDA driver fault under eager attention softmax
+alwaysApply: true
+---
+
+# `dh-dgx1-1` reproducibly crashed a resumed job 3/3 times
+
+On 2026-08-05, a manual continuation of `aug2026_cand_00016` (resumed from a
+step-1500 checkpoint via `--resume_from`) crashed **3 consecutive times**,
+always on node `dh-dgx1-1`, always with:
+
+```
+RuntimeError: CUDA driver error: invalid argument
+```
+
+Attempt 1 (`gradient_checkpointing=true`): crashed inside the checkpointed
+backward pass at the first optimizer step post-resume (step 1501, ~3:33
+elapsed). Attempt 2: identical crash, same step, same loss/acc values,
+same wall-clock timing -- fully deterministic on that node. Attempt 3
+(`gradient_checkpointing=false`, to rule out checkpointing/recompute as the
+cause): crashed even earlier, in the very FIRST forward pass, inside
+`eager_attention_forward`'s `nn.functional.softmax` call -- ruling out
+gradient checkpointing as the cause and pointing at the node/GPU itself.
+
+**Fix**: relaunching the identical job with `sbatch --exclude=dh-dgx1-1`
+(landed on `dh-dgx1-3`) succeeded past the exact point/wall-clock mark that
+killed all 3 prior attempts. This confirms a node-specific hardware/CUDA
+driver fault on `dh-dgx1-1`, not a code bug, not an OOM, and not specific to
+this checkpoint/config.
+
+## Action
+
+- If a job crashes with `CUDA driver error: invalid argument` (or other
+  low-level CUDA faults with no clear Python-side cause) and it's running on
+  `dh-dgx1-1`, retry with `sbatch --exclude=dh-dgx1-1` before spending time
+  debugging the training code.
+- Treat `dh-dgx1-1` as suspect for new launches until independently
+  re-verified healthy (e.g. a plain smoke job completes cleanly on it). Do
+  not blindly avoid it forever without re-testing -- this could also be a
+  transient/intermittent fault that clears on its own.
+- Don't assume a repeated identical crash (same step, same loss values) is
+  always a deterministic code bug -- check `sacct -j <jobid> --format=NodeList`
+  across attempts first; a single bad node can look exactly like a
+  deterministic software bug.

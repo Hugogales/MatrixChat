@@ -16,6 +16,8 @@ hyperparameters/run_*.json
 logs/run_*/
 logs/*.out
 logs/*.err
+logs/slurm/*.out
+logs/slurm/*.err
 checkpoints/run_*/
 checkpoints/**/*.pt
 

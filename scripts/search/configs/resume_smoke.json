@@ -1,0 +1,25 @@
+{
+  "rungs": [
+    {"target_steps": 3, "priority": 100}
+  ],
+  "initial_candidates": 1,
+  "target_active_candidates": 1,
+  "max_candidates": 1,
+  "train_slice_minutes": 0.1,
+  "probe_every": 0,
+  "eval_max_new_tokens": 4,
+  "promotion_fraction": 1.0,
+  "min_rung_population": 1,
+  "search_seed": 20260730,
+  "candidate_prefix": "smoke_resume",
+  "judge_enabled": false,
+  "strategist_enabled": false,
+  "fixed_candidate_overrides": {
+    "batch_size": 1,
+    "gradient_accumulation_steps": 1,
+    "gradient_checkpointing": true,
+    "max_flat_len": 1536,
+    "context_lookback_columns": 128,
+    "processed_data_dir": "/home/ad.msoe.edu/garrido-lestacheh/matrixchat/processed_meld_ami_nolaugh_noname_lookback128"
+  }
+}

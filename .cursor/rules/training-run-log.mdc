@@ -1,0 +1,14 @@
+---
+description: Keep TRAINING_RUN_LOG.md updated whenever a Slurm training job is submitted or cancelled
+alwaysApply: true
+---
+
+# Training run log
+
+`TRAINING_RUN_LOG.md` (repo root) is a concise, one-row-per-job table of every
+Slurm training job: Job ID, Run ID, submitted time, why it was started, end
+time/status, and why it stopped.
+
+Whenever you `sbatch` a new training job or `scancel` an existing one, add or
+update its row in the same turn — one concise sentence per "why" cell, no
+long explanations. Don't wait to be asked.

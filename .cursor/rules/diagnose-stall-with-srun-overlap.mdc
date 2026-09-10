@@ -1,0 +1,35 @@
+---
+description: Confirming whether a job with stale/unchanged log output is actually hung or just log-lagged
+alwaysApply: true
+---
+
+# Diagnosing a suspected stall: check GPU utilization, not just log mtimes
+
+Symptom: a job's `metrics.jsonl`/`.out`/`.err` show no new content for many
+minutes (sometimes 20-30+), longer than the usual few-minute log lag this
+cluster is known to have (see `.cursor/rules/first-step-validation-is-slow.mdc`).
+File-mtime checks and short wait-and-recheck (2-3 min) usually resolve the
+ambiguity, but occasionally the lag is long enough that it's unclear whether
+the process is genuinely hung or just slow to flush output.
+
+## Fix
+
+Check actual GPU utilization on the job's node without SSH, using `srun`'s
+`--overlap` flag to run a diagnostic command inside the job's existing
+allocation:
+
+```bash
+srun --jobid=<jobid> --overlap nvidia-smi --query-gpu=index,utilization.gpu,memory.used --format=csv
+```
+
+- `utilization.gpu` near 100% (and nonzero `memory.used`) means the process
+  is genuinely computing -- the log lag is cosmetic, not a real stall. Do not
+  cancel or intervene.
+- `utilization.gpu` at/near 0% with the job still `RUNNING` in `squeue` is a
+  much stronger signal of a genuine hang (e.g. deadlocked dataloader, stuck
+  NCCL/distributed call) -- worth escalating to a real stall investigation
+  (checking for zombie processes, cancelling and resubmitting, etc.).
+
+This is faster and more conclusive than repeated wait-and-recheck cycles on
+file mtimes alone, especially when a stall has already persisted longer than
+the cluster's normal log-lag window.

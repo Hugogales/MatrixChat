@@ -1,0 +1,66 @@
+---
+description: Don't mistake a slow/lagging output stream or the ~20min first validation pass for a hung job -- give it a full hour before cancelling.
+alwaysApply: true
+---
+
+# Output can lag behind actual progress -- give a job a full hour before assuming it's hung
+
+User-confirmed cluster quirk (07-22): this system's job output stream
+sometimes lags behind actual progress for no discernible reason -- the
+`.err`/`.out` files and `metrics.jsonl` can appear static even though the
+job is running fine underneath. **Rule of thumb: if it's been less than an
+hour since the job started (or since its last visible progress), treat it as
+still running with a delayed output stream, not hung.** Only consider
+cancelling after a full hour with zero progress.
+
+On top of that general quirk, there is also a specific, well-understood
+reason a FRESH job looks stalled right after its first step (see below) --
+but even that is really just a special case of "give it more time before
+judging," not a separate exception to the one-hour rule.
+
+# A fresh job's first logged step is normally silent for ~20 minutes
+
+`main.py`'s training loop runs a full validation pass unconditionally at
+step 1 (`if step == 1 or step % args.eval_every == 0`), not just at the
+configured `eval_every` cadence. With ~1013 validation examples at
+`batch_size=1`, this takes roughly **1195 seconds (~20 minutes)** -- confirmed
+from `UU`'s own historical step-1 record (`val_components.duration_sec`).
+
+During this window, the job's `.err`/`.out` files stop growing and
+`metrics.jsonl` stays empty (the tqdm postfix for step 1 shows loss/acc, but
+the actual `metrics_file.write()` only happens AFTER validation completes,
+later in the code path). This looks exactly like a hang if you only check
+elapsed time and file mtimes, but it is completely normal.
+
+## Before concluding a fresh job is hung
+
+1. Check how long it's been since the job started or since its last visible
+   progress. **Under one hour: assume it's fine, just laggy output or mid
+   first-validation-pass.** Do not cancel.
+2. Only escalate to "probably hung" after a full hour with zero progress
+   (no new `metrics.jsonl` entries, `.err`/`.out` completely static).
+3. Do not cancel and resubmit reflexively -- this wastes GPU time restarting
+   a job that was working fine, and (if it happens to land on a busy node
+   again) can look like a recurring "hang" that is actually the same normal
+   behavior repeating. This mistake was made twice in a row on 07-22 before
+   the real cause was found (see `TRAINING_RUN_LOG.md`).
+
+## The same trap applies to SMOKE TESTS, not just monitoring a real job
+
+07-27: burned well over an hour "debugging a hang" in a brand-new
+`main.py` feature (the in-training kitchen-sink probe, `--probe_every`)
+that turned out to have no bug at all -- the smoke test used a short
+`srun --time` budget with `--val_fraction` left non-zero, so step 1's
+unconditional full validation pass silently ate the entire budget before
+the new feature's own code ever ran. Every symptom (no new output, 100%
+GPU utilization, killed by time limit right as step 1's tqdm postfix
+finally flushed) matched this exact rule -- it should have been the first
+hypothesis checked, not the last.
+
+**When writing a quick smoke test for a NEW feature/change:** either pass
+`--val_fraction 0` (skip validation entirely -- the fastest way to get a
+clean, fast smoke run) or size the `srun --time` budget for the ~20 minute
+step-1 validation pass if validation itself needs exercising. Don't spend
+time hypothesizing about DataLoader workers, tokenizer fork deadlocks,
+gradient checkpointing, LoRA, or cluster contention before ruling this out
+first -- it is by far the most common cause of a "hung" first step.

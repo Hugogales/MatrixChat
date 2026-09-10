@@ -1,0 +1,71 @@
+---
+description: How to correctly arm background sentinel/heartbeat loops with notify_on_output
+alwaysApply: true
+---
+
+# Background sentinel/heartbeat loops must stay attached to a live Shell task
+
+When arming a delayed wake-up (e.g. "check on this training job in 55 minutes,
+then hourly"), `notify_on_output` only works if it is attached to a Shell tool
+call that is **still running** when the sentinel is printed, and the sentinel
+must be printed to that same call's **stdout** (not redirected elsewhere).
+
+## Mistake made previously (do not repeat)
+
+```bash
+nohup bash -c '
+sleep 3047
+echo "AGENT_LOOP_WAKE_race {...}"
+' > /tmp/heartbeat.log 2>&1 &
+disown
+echo "armed pid=$!"
+```
+
+This is broken two ways:
+1. The sentinel is redirected into a log file instead of stdout, so no
+   terminal ever shows it.
+2. The launcher command (the one `notify_on_output` was attached to) exits in
+   ~5 seconds after disowning the child — there is nothing left running for
+   the harness to watch by the time the sentinel would fire.
+
+Net effect: the wake never happens. The orphaned sleeper silently runs and
+writes to a file nobody is watching.
+
+## Correct pattern
+
+Issue the sleep+echo as a single Shell call, let it background naturally
+(or force with `block_until_ms: 0`), and put `notify_on_output` on that exact
+call:
+
+```bash
+sleep <seconds> && echo 'AGENT_LOOP_TICK_<purpose> {"prompt":"<prompt>"}'
+```
+
+with `notify_on_output: {"pattern": "^AGENT_LOOP_TICK_<purpose>", "reason": "...", "debounce_ms": 5000}`
+on that same tool call. No `nohup`, no `disown`, no output redirection.
+
+Verify after arming by reading the terminal file for that shell id: it must
+show no `exit_code`/`ended_at` yet (still running), with the sleep as the
+`command`. If the terminal shows an exit code already, the watcher is dead
+and must be re-armed correctly before relying on it.
+
+See `~/.cursor/skills-cursor/loop/SKILL.md` for the full pattern (fixed vs.
+dynamic schedules).
+
+## Local environment resets silently kill even correctly-armed loops
+
+A correctly-armed loop (plain backgrounded `sleep && echo`, no nohup/disown)
+still dies with no error and no notification if the local execution
+environment restarts — e.g. the user's machine sleeps/disconnects and
+reconnects. Symptoms: the terminal file for the shell id is simply gone
+(`ls` the terminals folder returns far fewer files than expected, or a
+specific id 404s), and `ps -p <pid>` / `ps aux | grep` for the sleeper find
+nothing anywhere on the box. Remote work unaffected by this (e.g. Slurm
+jobs, anything running on a separate host) keeps going fine — only the local
+watcher dies.
+
+There is no way to detect this proactively (no notification fires when it
+happens); a stalled wake-up may just be silence. After any sign of a
+possible environment restart (user mentions their machine sleeping/
+reconnecting, or an expected wake never arrived), check the terminals folder
+and re-arm the loop from scratch if it's gone.

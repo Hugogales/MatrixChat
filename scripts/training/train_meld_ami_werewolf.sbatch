@@ -33,6 +33,8 @@ MODEL_PATH="${MODEL_PATH:-models/Qwen3-4B-Instruct-2507}"
 PROCESSED_DIR="${PROCESSED_DIR:-$HOME/matrixchat/processed_meld_ami}"
 RUN_NAME="${RUN_NAME:-}"
 RESUME_FROM="${RESUME_FROM:-}"
+INIT_FROM="${INIT_FROM:-}"
+INIT_CHECKPOINT_PREFER="${INIT_CHECKPOINT_PREFER:-auto}"
 SEED="${SEED:-0}"
 
 # Matrix and Stage-A activity objective.
@@ -152,8 +154,15 @@ EXTRA_ARGS=()
 if [[ -n "$RUN_NAME" ]]; then
   EXTRA_ARGS+=(--run_name "$RUN_NAME")
 fi
+if [[ -n "$RESUME_FROM" && -n "$INIT_FROM" ]]; then
+  echo "[error] set only one of RESUME_FROM or INIT_FROM" >&2
+  exit 2
+fi
 if [[ -n "$RESUME_FROM" ]]; then
   EXTRA_ARGS+=(--resume_from "$RESUME_FROM")
+fi
+if [[ -n "$INIT_FROM" ]]; then
+  EXTRA_ARGS+=(--init_from "$INIT_FROM" --init_checkpoint_prefer "$INIT_CHECKPOINT_PREFER")
 fi
 
 singularity exec --nv -B /data:/data "$CONTAINER" python main.py \

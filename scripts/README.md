@@ -17,9 +17,9 @@ All scripts are grouped by purpose. Run every command from the repo root
 
 - `train_meld_ami_werewolf.sbatch` -- current training job (all 3 sources,
   equally weighted ~1/3 each, on a V100). Most hyperparameters are
-  environment-overridable -- see the script header and
-  `.cursor/rules/sbatch-env-overrides.mdc` before assuming an override took
-  effect.
+  environment-overridable. Set `INIT_FROM` + `INIT_CHECKPOINT_PREFER` for a
+  fresh warm start, or `RESUME_FROM` for an exact continuation when the full
+  training state is available; never set both.
 
 ## `search/` -- persistent rotating HPO
 
@@ -51,6 +51,9 @@ All scripts are grouped by purpose. Run every command from the repo root
   side as a table (one column per agent).
 - `demo_freeform_conversation.py` -- seed a free-form multi-agent
   conversation from one prompt and render the resulting transcript.
+- `run_best_model_conversations.sbatch` -- Slurm wrapper around the free-form
+  demo; accepts `CHECKPOINT_DIR`, `SEED_TEXT`, `NUM_AGENTS`,
+  `MAX_NEW_TOKENS`, `TEMPERATURE`, `SEED`, and `OUTPUT` overrides.
 - `demo_grid_render.py` -- render the exact `[Agent x Time]` grid for a
   specific (prompt, num_agents, seed) trial, for documenting an example.
 - `verify_cross_agent.py` -- logit-level proof that agents genuinely

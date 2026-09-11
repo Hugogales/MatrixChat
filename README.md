@@ -4,20 +4,28 @@ A PhD research prototype that represents multi-party LLM conversation as a
 **matrix** (agents x time) instead of a single flat token stream, wrapped around
 a Qwen3 causal language model.
 
-## Current milestone
+## Project status
 
-**Milestone 1: a testable matrix wrapper.** This is intentionally NOT the final
-architecture and NOT a useful trained model. The goal is correctness and
-testability:
+MatrixChat now includes the complete Stage-A research workflow: multi-source
+data conversion, Qwen3-4B LoRA training, checkpointing and warm starts,
+continuous turn-taking probes, broad stochastic evaluation, publication
+analysis, persistent hyperparameter search, and Slurm fleet tooling.
 
-- Add an agent dimension to the LLM input/output: `[B, A, T]` -> `[B, A, T, V]`.
-- Flatten the matrix column-major into a Qwen-compatible sequence.
-- Add learned agent embeddings (and optional channel embeddings).
-- Support two position modes: `flat` and `column`.
-- Support a matrix-causal attention mask.
-- One forward pass produces logits for all agents at once.
-- A generation helper predicts one next token for every agent in one pass.
-- Pass forward/backward tests with a tiny randomly initialized Qwen3 (offline).
+The current best verified checkpoint is
+`checkpoints/final40_h100_c106_s176106` (**c106**). It must be loaded together
+with the base `Qwen/Qwen3-4B-Instruct-2507` model. See
+[`AGENT_READ_THIS.md`](AGENT_READ_THIS.md) for a portable model handoff and
+exact inference, evaluation, and warm-start commands.
+
+The architecture:
+
+- represents input and output as `[batch, agent, time]` matrices;
+- flattens matrices column-major for a Qwen causal language model;
+- learns agent identity, inactive-cell, activity, and optional relation/state
+  components;
+- applies a matrix-causal mask with per-agent private-context visibility;
+- predicts both content tokens and whether each agent speaks next; and
+- generates all agents in lockstep from one shared model.
 
 ## Installation
 
@@ -35,10 +43,11 @@ pytest -q
 ```
 
 Tests run on CPU, offline, with a tiny random Qwen3 model (~91k params). They
-never download `Qwen/Qwen3-4B-Instruct-2507`. The suite (**41 tests**) covers
+never download `Qwen/Qwen3-4B-Instruct-2507`. The suite covers
 shapes, forward/backward gradients, position ids, mask semantics, causality and
 no-leakage, channel embeddings, loss masking, LoRA/freezing, config validation,
-and an end-to-end `main` smoke run.
+checkpoint migration, evaluation metrics, search controls, and end-to-end
+training smoke runs.
 
 ## Local smoke training
 
@@ -58,19 +67,134 @@ sbatch scripts/training/train_meld_ami_werewolf.sbatch
 All hyperparameters are set as bash variables (env-overridable) in the sbatch
 file and passed to `main.py` as CLI args. See the Rosie section below.
 
-## Repo structure
+## Repository structure
 
 ```
-model/          matrix wrapper, masks, activity/turn-taking reward, generation, LoRA utils
-training/       argparse config, run-id tracking, tiny-model + toy batch, multi-source loader
-tests/          pytest suite (CPU, offline)
-scripts/        SLURM entrypoints + tooling, grouped by purpose -- see scripts/README.md
-logs/           per-run logs  (logs/{run_id}/, incl. metrics.jsonl, samples.jsonl)
-hyperparameters/ saved run_NNNNNN.json hyperparameter files
-checkpoints/    per-run checkpoints (checkpoints/{run_id}/)
-data/           dataset pipeline: schema, adapters, converter, manifest, dataset_plan.md
-main.py         training entrypoint (toy smoke path + real Stage-2 data path)
+main.py                 training entrypoint for tiny smoke and real data
+model/                  matrix wrapper, masks, generation, agent state/relation,
+                        LoRA utilities, and activity/turn-taking objectives
+training/               CLI config, loaders, checkpointing, optimization,
+                        race scoring, and multi-source sampling
+data/                   schemas, source adapters, conversion, validation,
+                        manifests, and dataset design notes
+evaluation/             paired-continuation metrics and statistical tests
+scripts/
+  data_prep/            downloads and CPU/GPU preprocessing jobs
+  training/             standard and ablation training sbatch files
+  eval/                 probes, conversations, baselines, and held-out evals
+  final_runs/           frozen-config training and publication pipeline
+  search/               controller, watchdog, workers, configs, and HPO state
+  analysis/             plots, comparisons, and publication analysis
+  ops/                  GPU yield daemon and priority job queue
+tests/                  offline unit/integration tests
+models/                 local base models (not committed)
+checkpoints/            model and resumable training states by run name
+hyperparameters/        exact JSON configuration recorded for each run
+logs/                   metrics, samples, probes, Slurm output, and contracts
+paper_results_*/        generated publication bundles
 ```
+
+Generated datasets, base models, checkpoints, logs, search state, and
+publication outputs are intentionally separate from source code and can be
+very large. `scripts/README.md` provides the detailed script map.
+
+## Common workflows
+
+Run all commands from the repository root. Create output directories before a
+first Slurm submission:
+
+```bash
+mkdir -p logs/slurm checkpoints hyperparameters
+```
+
+### Prepare real datasets
+
+```bash
+SOURCES="meld ami werewolf" bash scripts/data_prep/download_data.sh
+sbatch scripts/data_prep/preprocess_meld_ami_werewolf.sbatch
+```
+
+The preprocessing job writes Arrow shards and a `manifest.json`. Point
+`PROCESSED_DIR` at that directory for training.
+
+### Submit a training job
+
+```bash
+RUN_NAME=my_experiment \
+SEED=42 \
+PROCESSED_DIR="$HOME/matrixchat/processed_meld_ami" \
+NUM_STEPS=1500 \
+NUM_EPOCHS=20 \
+PROBE_EVERY=250 \
+sbatch scripts/training/train_meld_ami_werewolf.sbatch
+```
+
+The sbatch script is environment-overridable, so experiments normally do not
+require copied run files. It records the resolved configuration in
+`hyperparameters/<run-name>.json`, metrics in `logs/<run-name>/`, and weights
+in `checkpoints/<run-name>/`.
+
+Warm-start a fresh optimizer and step counter from c106:
+
+```bash
+RUN_NAME=my_warm_start \
+INIT_FROM=checkpoints/final40_h100_c106_s176106 \
+INIT_CHECKPOINT_PREFER=root \
+NUM_STEPS=1500 NUM_EPOCHS=20 \
+sbatch scripts/training/train_meld_ami_werewolf.sbatch
+```
+
+`INIT_FROM` is not an exact resume. Exact continuation uses `RESUME_FROM` with
+a checkpoint containing `last/training_state.pt`; its `NUM_STEPS` and
+`NUM_EPOCHS` must allow steps beyond the restored step.
+
+### Monitor and inspect a run
+
+```bash
+squeue -u "$USER"
+tail -f logs/slurm/<job-name>_<job-id>.out
+tail -f logs/<run-name>/metrics.jsonl
+python scripts/analysis/plot_metrics.py --run_dir logs/<run-name>
+```
+
+Do not judge a checkpoint from aggregate loss alone. Read at least several
+decoded outputs from `checkpoint_probe_latest.json` and check for silence,
+overlap/echo hacking, repetition, and cross-source vocabulary leakage.
+
+### Run checkpoint evaluation
+
+Fast handoff probe:
+
+```bash
+python scripts/eval/turn_taking_probe.py \
+  --checkpoint_dir checkpoints/final40_h100_c106_s176106 \
+  --scenario handoff --num_agents 3 --device cuda
+```
+
+Frozen held-out continuation evaluation on Slurm:
+
+```bash
+CONTRACT=logs/final_runs_20260827_recontract/publication_full.json \
+CHECKPOINT_DIR=checkpoints/final40_h100_c106_s176106 \
+CHECKPOINT_PREFER=root \
+OUTPUT_DIR=paper_results_c106 \
+TRUST_FROZEN_CONTRACT=1 \
+sbatch scripts/final_runs/evaluate_final_checkpoint.sbatch
+```
+
+### Generate a conversation
+
+```bash
+CHECKPOINT_DIR=checkpoints/final40_h100_c106_s176106 \
+SEED_TEXT="What should our group discuss today?" \
+NUM_AGENTS=3 \
+MAX_NEW_TOKENS=120 \
+sbatch scripts/eval/run_best_model_conversations.sbatch
+```
+
+The transcript appears in `logs/slurm/`; structured JSON is written under
+`logs/best_model_conversations/`. For an existing interactive GPU allocation,
+use `scripts/eval/demo_freeform_conversation.py` directly.
 
 ## Checkpoints
 

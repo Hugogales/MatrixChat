@@ -3,8 +3,12 @@ transformers>=4.51.0
 peft
 accelerate
 datasets
+tqdm
 pytest
 numpy
 
 # Optional (not required for unit tests):
 # bitsandbytes
+matplotlib  # scripts/plot_metrics.py (metrics export/plots)
+optuna  # scripts/search/bayes_opt.py (TPE hyperparameter search sampler)
+pyspellchecker  # data/adapters/_text_cleaning.py (Molweni grammar/spelling pass)

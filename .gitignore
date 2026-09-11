@@ -16,8 +16,13 @@ hyperparameters/run_*.json
 logs/run_*/
 logs/*.out
 logs/*.err
+logs/slurm/*.out
+logs/slurm/*.err
 checkpoints/run_*/
 checkpoints/**/*.pt
+
+# Local model downloads (e.g. Qwen3-4B pulled from the HF Hub)
+models/
 
 # Models / data
 *.bin

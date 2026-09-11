@@ -1,0 +1,25 @@
+{
+  "rungs": [
+    {"target_steps": 500, "priority": 100},
+    {"target_steps": 1500, "priority": 200},
+    {"target_steps": 5000, "priority": 300}
+  ],
+  "initial_candidates": 10,
+  "target_active_candidates": 10,
+  "max_candidates": 200,
+  "train_slice_minutes": 45,
+  "probe_every": 250,
+  "eval_max_new_tokens": 48,
+  "promotion_fraction": 0.3333333333,
+  "min_rung_population": 3,
+  "search_seed": 20260728,
+  "candidate_prefix": "aug2026",
+  "judge_enabled": true,
+  "judge_base_url": "http://dh-dgxh100-2.hpc.msoe.edu:8000/v1",
+  "judge_model": "meta/llama-4-scout-17b-16e-instruct",
+  "judge_trials_by_rung": [12, 18, 24],
+  "judge_calibration_path": "searches/month_2026_08/judge_calibration_provisional_v3.json",
+  "require_calibrated_judge": true,
+  "strategist_enabled": true,
+  "strategist_quota": 5
+}

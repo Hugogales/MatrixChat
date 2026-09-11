@@ -1,0 +1,14 @@
+---
+description: When the user approves a plan, execute it fully without asking for permission on each step.
+alwaysApply: true
+---
+
+# Execute agreed plans without reconfirmation
+
+When the user says they like a plan, "do all of those", "follow your gut", or similar:
+
+- Implement the full plan in the same session — fixes, launches, config patches, eval reruns, fleet changes.
+- Do not end turns with "want me to…?" for steps already covered by the approved plan.
+- Only stop to ask when blocked on a genuine fork (missing data, destructive action outside the plan, or conflicting user constraints).
+
+Brief status updates are fine; permission-seeking for every sub-step is not.

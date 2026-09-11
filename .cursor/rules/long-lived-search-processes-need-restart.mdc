@@ -1,0 +1,45 @@
+---
+description: Editing controller.py/watchdog.py/worker.py/pool_manager.py while the search is running has NO effect until those specific jobs are restarted
+alwaysApply: true
+---
+
+# Editing the search's long-lived scripts does nothing until you restart them
+
+`scripts/search/controller.py`, `watchdog.py`, `pool_manager.py`, and
+`worker.py` are each launched ONCE per SLURM job and then run an internal
+`while True` polling loop for days (`controller.sbatch`/`watchdog.sbatch`
+self-chain around day 5; `worker_pool*.sbatch` self-chains too). Python
+imports each of these files into memory a single time at process startup --
+editing the file on disk afterward has **zero effect on the already-running
+process**. This bit us for real on 2026-07-31: `worker.py` was edited to
+pass a new CLI flag, but the live worker pool (started hours earlier) kept
+launching training subprocesses without it, so a bug fix silently never took
+effect until this was diagnosed by noticing a failure happened chronologically
+*after* the "fix" was deployed.
+
+**`main.py` (and anything else worker.py/controller.py only ever invokes via
+a fresh `subprocess.run(...)`) is NOT subject to this** -- each ticket execs
+a brand-new interpreter that reads the current file from disk, so edits to
+`main.py`/`training/*.py` take effect on the very next ticket automatically.
+
+## After editing any of controller.py / watchdog.py / worker.py / pool_manager.py
+
+1. Identify the exact running job(s) that would need to pick up the change
+   (`squeue`, cross-reference against `matrix_month_controller` /
+   `matrix_month_watchdog` / `matrix_month_workers*` job names).
+2. `scancel` that job. If it's the worker pool, first manually force-reclaim
+   any tickets it had claimed (`reclaim_stale_claims(paths, max_age_seconds=0)`
+   from `scripts.search.search_state`) rather than waiting out the default
+   3-hour stale-lease timeout.
+3. Resubmit the corresponding `*.sbatch` file. Expect the recently-edited
+   file to possibly hit the stale-filesystem-cache null-bytes bug
+   (`.cursor/rules/stale-file-cache-null-bytes.mdc`) on the first resubmit
+   attempt -- verify 0 null bytes locally, delete+rewrite to force a new
+   inode if it does, and resubmit again.
+4. Verify the restarted job is actually healthy (correct GPU allocation,
+   `.err` free of tracebacks, queue actively claiming/producing fresh
+   results) before considering the fix live.
+
+Never assume a code change to one of these four files is live just because
+the edit was saved and tests pass -- tests only prove the code is correct,
+not that the right process is running it.

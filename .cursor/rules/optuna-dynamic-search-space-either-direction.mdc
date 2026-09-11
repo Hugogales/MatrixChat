@@ -1,0 +1,51 @@
+---
+description: Editing an Optuna search dimension's choices on a live study (widening OR narrowing) silently doesn't take effect
+alwaysApply: true
+---
+
+# Changing a categorical search-space dimension in-place doesn't take effect either direction
+
+Editing `*_choices` in a live search's config (and patching the running
+`search_state.json`) to change a categorical hyperparameter's allowed values
+looks like it worked (`bayes_opt.ask(study, new_config)` reads the new
+config, `suggest_categorical(name, new_choices)` is called with the new
+list) but **silently has no effect** if the study already has trials
+recorded with a *different* choice set for that same parameter name.
+
+Confirmed twice now:
+- 2026-08-05: widening a choice set on a live study ("Optuna categorical
+  choice sets cannot safely be expanded in-place").
+- 2026-08-07/08: **narrowing** a choice set had the identical failure --
+  `chain_rich_oversample_factor_choices` was cut from `[1.0, 3.0]` to
+  `[1.0]` on a live, restarted controller, but the very next real candidates
+  sampled still got `3.0`. `study.trials[-1].distributions` still showed
+  `CategoricalDistribution(choices=(1.0, 3.0))` after the "fix" -- Optuna's
+  grouped/multivariate `TPESampler` caches distributions from trial
+  history and does not pick up an in-run change to `suggest_categorical`'s
+  choices argument for a parameter it has already seen, regardless of
+  which direction the change goes.
+
+**Always verify a search-space edit actually landed** by checking
+`study.trials[-1].distributions[name]` (or just sampling a few fresh
+`ask()` calls) after restarting -- don't trust that patching the config
+and restarting the controller was sufficient just because no error was
+raised and the job came back up healthy.
+
+## Fix
+
+Rebuild the study fresh (same procedure as any other Optuna contamination
+fix, see `.cursor/rules/search-worker-handled-failures.mdc`):
+
+1. Stop the controller.
+2. Archive/delete `optuna_study.db`.
+3. Clear `optuna_trial_number`/`optuna_told` on every candidate in
+   `search_state.json` (the taint is study-wide for the affected parameter,
+   not trial-specific -- no existing trial number is safe to keep).
+4. Create a fresh study and call `backfill_from_state` with the **already-
+   updated** (narrowed/widened) config. `add_completed_trial` correctly
+   raises inside `optuna.trial.create_trial` (caught and skipped by
+   `backfill_from_state`) for any historical candidate whose recorded value
+   no longer fits the new distribution -- so the fresh study never learns
+   the old choice set exists, and this filtering needs no extra code.
+5. Restart the controller, then confirm with a real `ask()` (or the next
+   real sampled candidate) that only the intended choices appear.

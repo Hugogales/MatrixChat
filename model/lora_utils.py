@@ -1,7 +1,8 @@
 """LoRA and parameter-freezing utilities for MatrixChat.
 
-The matrix-interface parameters (agent embeddings, optional channel embeddings)
-must remain trainable even when the base model is frozen.
+The matrix-interface parameters (agent embeddings, optional channel embeddings,
+the inactive-cell embedding, and the activity head) must remain trainable even
+when the base model is frozen.
 """
 
 from __future__ import annotations
@@ -11,7 +12,14 @@ import torch.nn as nn
 
 def _matrix_interface_modules(model: nn.Module):
     """Yield the wrapper's own (non-base) trainable modules."""
-    for name in ("agent_embeddings", "channel_embeddings"):
+    for name in (
+        "agent_embeddings",
+        "agent_attention",
+        "agent_same_attention_bias",
+        "channel_embeddings",
+        "inactive_embedding",
+        "activity_head",
+    ):
         module = getattr(model, name, None)
         if module is not None:
             yield module
@@ -78,6 +86,34 @@ def unfreeze_last_n_layers(model: nn.Module, n: int) -> int:
 
     n = min(n, len(layers))
     for layer in layers[-n:]:
+        for param in layer.parameters():
+            param.requires_grad = True
+    return n
+
+
+def unfreeze_first_n_layers(model: nn.Module, n: int) -> int:
+    """Unfreeze the first ``n`` (bottom/early) transformer decoder layers.
+
+    Useful to let the early layers adapt to the new agent-augmented input
+    representation. Note: unfreezing early layers does NOT require unfreezing the
+    rest of the model -- each layer's ``requires_grad`` is independent -- but
+    backprop must still traverse all layers above the earliest trainable one, so
+    it is more expensive than unfreezing only the top layers.
+
+    Returns the number of layers actually unfrozen.
+    """
+    if n <= 0:
+        return 0
+
+    layers = _find_decoder_layers(model)
+    if layers is None:
+        raise RuntimeError(
+            "Could not locate transformer decoder layers to unfreeze. "
+            "Checked .model.layers, .model.model.layers, .transformer.h, .layers."
+        )
+
+    n = min(n, len(layers))
+    for layer in layers[:n]:
         for param in layer.parameters():
             param.requires_grad = True
     return n

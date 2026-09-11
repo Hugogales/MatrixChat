@@ -1,0 +1,684 @@
+{
+  "version": "provisional-v2",
+  "minimum_items": 12,
+  "items": [
+    {
+      "trial": {
+        "prompt": "That is my view. What do you think?",
+        "context_kind": "cold",
+        "num_agents": 2,
+        "overlap": false,
+        "listener_spoke": true,
+        "clean_handoff": true,
+        "chain": [
+          {
+            "matrix_cells": [
+              [
+                ".",
+                "I"
+              ],
+              [
+                ".",
+                " agree"
+              ],
+              [
+                ".",
+                "."
+              ]
+            ],
+            "outputs": [
+              "",
+              "I agree."
+            ]
+          }
+        ]
+      },
+      "labels": {
+        "turn_taking_naturalness": 3,
+        "coherence_topic_relevance": 3,
+        "non_degeneracy": 3,
+        "responsiveness": 3,
+        "human_likeness_continuity": 3,
+        "failure_tags": []
+      }
+    },
+    {
+      "trial": {
+        "prompt": "Anyone want to add something?",
+        "context_kind": "cold",
+        "num_agents": 3,
+        "overlap": false,
+        "listener_spoke": true,
+        "clean_handoff": true,
+        "chain": [
+          {
+            "matrix_cells": [
+              [
+                ".",
+                ".",
+                "."
+              ],
+              [
+                ".",
+                "Yes",
+                "."
+              ],
+              [
+                ".",
+                ",",
+                "."
+              ],
+              [
+                ".",
+                " one",
+                "."
+              ],
+              [
+                ".",
+                " point",
+                "."
+              ],
+              [
+                ".",
+                ".",
+                "."
+              ]
+            ],
+            "outputs": [
+              "",
+              "Yes, one point.",
+              ""
+            ]
+          }
+        ]
+      },
+      "labels": {
+        "turn_taking_naturalness": 3,
+        "coherence_topic_relevance": 3,
+        "non_degeneracy": 3,
+        "responsiveness": 3,
+        "human_likeness_continuity": 3,
+        "failure_tags": []
+      }
+    },
+    {
+      "trial": {
+        "prompt": "How should we proceed?",
+        "context_kind": "real_prefix",
+        "num_agents": 3,
+        "overlap": false,
+        "listener_spoke": true,
+        "clean_handoff": true,
+        "chain": [
+          {
+            "matrix_cells": [
+              [
+                ".",
+                "We",
+                "."
+              ],
+              [
+                ".",
+                " should",
+                "."
+              ],
+              [
+                ".",
+                " test",
+                "."
+              ],
+              [
+                ".",
+                ".",
+                "."
+              ],
+              [
+                ".",
+                ".",
+                "Agreed"
+              ],
+              [
+                ".",
+                ".",
+                "."
+              ]
+            ],
+            "outputs": [
+              "",
+              "We should test.",
+              "Agreed."
+            ]
+          }
+        ]
+      },
+      "labels": {
+        "turn_taking_naturalness": 3,
+        "coherence_topic_relevance": 3,
+        "non_degeneracy": 3,
+        "responsiveness": 3,
+        "human_likeness_continuity": 3,
+        "failure_tags": []
+      }
+    },
+    {
+      "trial": {
+        "prompt": "What does everyone else think?",
+        "context_kind": "cold",
+        "num_agents": 3,
+        "overlap": false,
+        "listener_spoke": false,
+        "clean_handoff": false,
+        "chain": [
+          {
+            "matrix_cells": [
+              [
+                "I",
+                ".",
+                "."
+              ],
+              [
+                " think",
+                ".",
+                "."
+              ],
+              [
+                " so",
+                ".",
+                "."
+              ],
+              [
+                " too",
+                ".",
+                "."
+              ]
+            ],
+            "outputs": [
+              "I think so too.",
+              "",
+              ""
+            ]
+          }
+        ]
+      },
+      "labels": {
+        "turn_taking_naturalness": 1,
+        "coherence_topic_relevance": 2,
+        "non_degeneracy": 3,
+        "responsiveness": 0,
+        "human_likeness_continuity": 2,
+        "failure_tags": [
+          "silence"
+        ]
+      }
+    },
+    {
+      "trial": {
+        "prompt": "I am done talking. Who is next?",
+        "context_kind": "post_intro",
+        "num_agents": 4,
+        "overlap": false,
+        "listener_spoke": false,
+        "clean_handoff": false,
+        "chain": [
+          {
+            "matrix_cells": [
+              [
+                "Okay",
+                ".",
+                ".",
+                "."
+              ],
+              [
+                " I",
+                ".",
+                ".",
+                "."
+              ],
+              [
+                " will",
+                ".",
+                ".",
+                "."
+              ],
+              [
+                " keep",
+                ".",
+                ".",
+                "."
+              ],
+              [
+                " talking",
+                ".",
+                ".",
+                "."
+              ]
+            ],
+            "outputs": [
+              "Okay I will keep talking.",
+              "",
+              "",
+              ""
+            ]
+          }
+        ]
+      },
+      "labels": {
+        "turn_taking_naturalness": 0,
+        "coherence_topic_relevance": 2,
+        "non_degeneracy": 3,
+        "responsiveness": 0,
+        "human_likeness_continuity": 0,
+        "failure_tags": [
+          "silence"
+        ]
+      }
+    },
+    {
+      "trial": {
+        "prompt": "What is your opinion?",
+        "context_kind": "lengthy",
+        "num_agents": 2,
+        "overlap": false,
+        "listener_spoke": false,
+        "clean_handoff": false,
+        "chain": [
+          {
+            "matrix_cells": [
+              [
+                "I",
+                "."
+              ],
+              [
+                " think",
+                "."
+              ],
+              [
+                " it",
+                "."
+              ],
+              [
+                " is",
+                "."
+              ],
+              [
+                " great",
+                "."
+              ],
+              [
+                " I",
+                "."
+              ],
+              [
+                " think",
+                "."
+              ],
+              [
+                " it",
+                "."
+              ],
+              [
+                " is",
+                "."
+              ],
+              [
+                " great",
+                "."
+              ]
+            ],
+            "outputs": [
+              "I think it is great. I think it is great.",
+              ""
+            ]
+          }
+        ]
+      },
+      "labels": {
+        "turn_taking_naturalness": 0,
+        "coherence_topic_relevance": 2,
+        "non_degeneracy": 1,
+        "responsiveness": 0,
+        "human_likeness_continuity": 1,
+        "failure_tags": [
+          "silence",
+          "echo"
+        ]
+      }
+    },
+    {
+      "trial": {
+        "prompt": "Which option should we choose?",
+        "context_kind": "cold",
+        "num_agents": 2,
+        "overlap": true,
+        "listener_spoke": true,
+        "clean_handoff": false,
+        "chain": [
+          {
+            "matrix_cells": [
+              [
+                "I",
+                "I"
+              ],
+              [
+                " choose",
+                " choose"
+              ],
+              [
+                " two",
+                " two"
+              ],
+              [
+                " again",
+                " again"
+              ]
+            ],
+            "outputs": [
+              "I choose two again.",
+              "I choose two again."
+            ]
+          }
+        ]
+      },
+      "labels": {
+        "turn_taking_naturalness": 0,
+        "coherence_topic_relevance": 2,
+        "non_degeneracy": 0,
+        "responsiveness": 1,
+        "human_likeness_continuity": 1,
+        "failure_tags": [
+          "overlap",
+          "echo"
+        ]
+      }
+    },
+    {
+      "trial": {
+        "prompt": "Any final thoughts?",
+        "context_kind": "primed_handoff_gap0",
+        "num_agents": 3,
+        "overlap": true,
+        "listener_spoke": true,
+        "clean_handoff": false,
+        "chain": [
+          {
+            "matrix_cells": [
+              [
+                "Yes",
+                "Yes",
+                "Yes"
+              ],
+              [
+                " yes",
+                " yes",
+                " yes"
+              ],
+              [
+                " okay",
+                " okay",
+                " okay"
+              ],
+              [
+                " yes",
+                " yes",
+                " yes"
+              ]
+            ],
+            "outputs": [
+              "Yes yes okay yes.",
+              "Yes yes okay yes.",
+              "Yes yes okay yes."
+            ]
+          }
+        ]
+      },
+      "labels": {
+        "turn_taking_naturalness": 0,
+        "coherence_topic_relevance": 1,
+        "non_degeneracy": 0,
+        "responsiveness": 1,
+        "human_likeness_continuity": 0,
+        "failure_tags": [
+          "overlap",
+          "echo"
+        ]
+      }
+    },
+    {
+      "trial": {
+        "prompt": "What should we do next?",
+        "context_kind": "primed_handoff_gap3",
+        "num_agents": 4,
+        "overlap": true,
+        "listener_spoke": true,
+        "clean_handoff": false,
+        "chain": [
+          {
+            "matrix_cells": [
+              [
+                "uh",
+                "go",
+                "what",
+                "okay"
+              ],
+              [
+                "uh",
+                "go",
+                "what",
+                "okay"
+              ],
+              [
+                "um",
+                "again",
+                "thing",
+                "yes"
+              ],
+              [
+                "uh",
+                "go",
+                "what",
+                "okay"
+              ]
+            ],
+            "outputs": [
+              "uh uh um uh",
+              "go go again go",
+              "what what thing what",
+              "okay okay yes okay"
+            ]
+          }
+        ]
+      },
+      "labels": {
+        "turn_taking_naturalness": 0,
+        "coherence_topic_relevance": 0,
+        "non_degeneracy": 0,
+        "responsiveness": 0,
+        "human_likeness_continuity": 0,
+        "failure_tags": [
+          "overlap",
+          "babble"
+        ]
+      }
+    },
+    {
+      "trial": {
+        "prompt": "Is the schedule realistic?",
+        "context_kind": "real_prefix",
+        "num_agents": 2,
+        "overlap": true,
+        "listener_spoke": true,
+        "clean_handoff": false,
+        "chain": [
+          {
+            "matrix_cells": [
+              [
+                "I",
+                "."
+              ],
+              [
+                " think",
+                "The"
+              ],
+              [
+                " we",
+                " deadline"
+              ],
+              [
+                " need",
+                " is"
+              ],
+              [
+                " more",
+                " Friday"
+              ],
+              [
+                " time",
+                "."
+              ]
+            ],
+            "outputs": [
+              "I think we need more time.",
+              "The deadline is Friday."
+            ]
+          }
+        ]
+      },
+      "labels": {
+        "turn_taking_naturalness": 1,
+        "coherence_topic_relevance": 3,
+        "non_degeneracy": 3,
+        "responsiveness": 2,
+        "human_likeness_continuity": 3,
+        "failure_tags": [
+          "overlap"
+        ]
+      }
+    },
+    {
+      "trial": {
+        "prompt": "How did Spain win the match?",
+        "context_kind": "cold",
+        "num_agents": 3,
+        "overlap": false,
+        "listener_spoke": true,
+        "clean_handoff": true,
+        "chain": [
+          {
+            "matrix_cells": [
+              [
+                ".",
+                "They",
+                "."
+              ],
+              [
+                ".",
+                " scored",
+                "."
+              ],
+              [
+                ".",
+                " late",
+                "."
+              ],
+              [
+                ".",
+                ".",
+                "."
+              ]
+            ],
+            "outputs": [
+              "",
+              "They scored late.",
+              ""
+            ]
+          }
+        ]
+      },
+      "labels": {
+        "turn_taking_naturalness": 3,
+        "coherence_topic_relevance": 3,
+        "non_degeneracy": 3,
+        "responsiveness": 3,
+        "human_likeness_continuity": 3,
+        "failure_tags": []
+      }
+    },
+    {
+      "trial": {
+        "prompt": "How did Spain win the match?",
+        "context_kind": "cold",
+        "num_agents": 2,
+        "overlap": false,
+        "listener_spoke": true,
+        "clean_handoff": true,
+        "chain": [
+          {
+            "matrix_cells": [
+              [
+                ".",
+                "My"
+              ],
+              [
+                ".",
+                " favorite"
+              ],
+              [
+                ".",
+                " cheese"
+              ],
+              [
+                ".",
+                " is"
+              ],
+              [
+                ".",
+                " blue"
+              ]
+            ],
+            "outputs": [
+              "",
+              "My favorite cheese is blue."
+            ]
+          }
+        ]
+      },
+      "labels": {
+        "turn_taking_naturalness": 2,
+        "coherence_topic_relevance": 0,
+        "non_degeneracy": 3,
+        "responsiveness": 0,
+        "human_likeness_continuity": 0,
+        "failure_tags": [
+          "off_topic"
+        ]
+      }
+    }
+  ],
+  "pairs": [
+    {
+      "left": 0,
+      "right": 6,
+      "expected": "A"
+    },
+    {
+      "left": 1,
+      "right": 3,
+      "expected": "A"
+    },
+    {
+      "left": 2,
+      "right": 8,
+      "expected": "A"
+    },
+    {
+      "left": 10,
+      "right": 5,
+      "expected": "A"
+    },
+    {
+      "left": 9,
+      "right": 7,
+      "expected": "A"
+    }
+  ]
+}

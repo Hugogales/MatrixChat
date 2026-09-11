@@ -1,0 +1,42 @@
+---
+description: Manually resuming a checkpoint with --resume_from needs an explicit NUM_STEPS/NUM_EPOCHS past the resumed step
+alwaysApply: true
+---
+
+# `--resume_from` needs an explicit step target past the resumed step
+
+`main.py` computes the run's step cap independently of the checkpoint you
+resume from:
+
+```
+total_planned_steps = steps_per_epoch * num_epochs
+total_steps = min(num_steps, total_planned_steps) if num_steps else total_planned_steps
+```
+
+This is computed fresh from the run's OWN `num_epochs`/dataset size, not
+adjusted for whatever step the resumed optimizer/scheduler state says it's
+already at (`[info] resumed optimizer/scheduler at epoch=X step=Y`).
+
+If `total_steps <= Y` (the resumed step), the training loop has nothing left
+to do -- the job launches, loads the model, resumes state, and then trains
+**zero additional steps** while still looking healthy (RUNNING, no traceback,
+real GPU memory allocated during model load). This is easy to miss because
+nothing errors; it just silently produces no new checkpoints or probes.
+
+Symptom to watch for: after `[info] resumed optimizer/scheduler at epoch=X
+step=Y`, no `train: N%|...` progress line and no growth in
+`logs/<run_id>/metrics.jsonl` after several minutes, even though `nvidia-smi`
+shows the process using real memory (from loading the model) -- check
+`total planned steps=N` in the startup banner against the resumed step Y; if
+N <= Y, this is the cause, not a genuine hang.
+
+## Fix
+
+When resuming a checkpoint for continued training, always pass explicit
+`NUM_STEPS` (and a `NUM_EPOCHS` large enough that `steps_per_epoch *
+num_epochs >= NUM_STEPS`) so the cap sits meaningfully past the checkpoint's
+own resumed step -- e.g. resuming from step 1500 to add another ~1500 steps
+needs `NUM_STEPS=3000` (not the sbatch script's default `NUM_EPOCHS`/`0`).
+
+Verify the fix by checking the startup banner's `total planned steps=N` is
+comfortably above the resumed step before assuming the job is doing anything.

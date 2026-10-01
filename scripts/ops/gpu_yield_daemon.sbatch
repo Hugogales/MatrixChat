@@ -29,8 +29,14 @@ set -uo pipefail
 
 LIVE="${LIVE:-0}"
 INTERVAL_SECONDS="${INTERVAL_SECONDS:-15}"
+BUDGET_DGX_GPUS="${BUDGET_DGX_GPUS:-24}"
+BUDGET_H100_GPUS="${BUDGET_H100_GPUS:-7}"
 
-ARGS=(--interval-seconds "$INTERVAL_SECONDS")
+ARGS=(
+  --interval-seconds "$INTERVAL_SECONDS"
+  --budget-dgx-gpus "$BUDGET_DGX_GPUS"
+  --budget-h100-gpus "$BUDGET_H100_GPUS"
+)
 if [[ "$LIVE" == "1" ]]; then
   ARGS+=(--live)
 fi

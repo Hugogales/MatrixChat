@@ -119,6 +119,63 @@ def _turns(cells: list) -> list[dict]:
     return [turn for turn in turns if turn.get("text")]
 
 
+def _matrix_rows(cells: list) -> list[dict]:
+    """Coalesce adjacent columns with the same active-speaker set.
+
+    Each row retains a true time range, so overlap and silence remain visible
+    instead of being flattened into a speaker transcript.
+    """
+    rows: list[dict] = []
+    current_speakers: tuple[int, ...] | None = None
+    current_tokens: list[list[str]] = []
+    start = 0
+
+    def flush(end: int) -> None:
+        if current_speakers is None:
+            return
+        rows.append(
+            {
+                "start": start,
+                "end": end,
+                "tokens": ["".join(tokens).strip() for tokens in current_tokens],
+            }
+        )
+
+    for time, column in enumerate(cells or []):
+        tokens = [str(token or "") for token in column]
+        speakers = tuple(index for index, token in enumerate(tokens) if token.strip())
+        if speakers != current_speakers:
+            flush(time - 1)
+            current_speakers = speakers
+            current_tokens = [[] for _ in tokens]
+            start = time
+        if len(tokens) > len(current_tokens):
+            current_tokens.extend([] for _ in range(len(tokens) - len(current_tokens)))
+        for index, token in enumerate(tokens):
+            current_tokens[index].append(token)
+    flush(len(cells or []) - 1)
+    return rows
+
+
+def _md_matrix(rows: list[dict]) -> str:
+    if not rows:
+        return "_empty_"
+    agent_count = max((len(row["tokens"]) for row in rows), default=0)
+    lines = [
+        "| Time | " + " | ".join(f"A{index}" for index in range(agent_count)) + " |",
+        "| --- | " + " | ".join("---" for _ in range(agent_count)) + " |",
+    ]
+    for row in rows:
+        start, end = row["start"], row["end"]
+        time = f"t{start}" if start == end else f"t{start}–t{end}"
+        cells = [
+            (row["tokens"][index] if index < len(row["tokens"]) else "") or "—"
+            for index in range(agent_count)
+        ]
+        lines.append("| " + time + " | " + " | ".join(cells) + " |")
+    return "\n".join(lines)
+
+
 def _example(record: dict) -> dict:
     prefix = record.get("prefix") or {}
     human = record.get("human") or {}
@@ -138,6 +195,9 @@ def _example(record: dict) -> dict:
         "prefix_turns": _turns(prefix.get("cells") or []),
         "human_turns": _turns(human.get("cells") or []),
         "model_turns": _turns(model.get("cells") or []),
+        "prefix_matrix": _matrix_rows(prefix.get("cells") or []),
+        "human_matrix": _matrix_rows(human.get("cells") or []),
+        "model_matrix": _matrix_rows(model.get("cells") or []),
     }
 
 
@@ -209,7 +269,9 @@ def render_markdown(chosen: dict[str, list[dict]]) -> str:
         "",
         "Selected by blinded judge score on the **model** continuation, requiring **at least two clean handoffs** in that continuation (chained ranking-event classifier: resolved listener floor, zero overlap). One conversation id per slot, no CJK, no Werewolf-term leakage onto AMI/MELD. MELD is included here as qualitative examples even though it is excluded from the statistical sample.",
         "",
-        "Each example shows per-agent decoded text (easiest to paste into the paper) plus a collapsed turn view.",
+        "Each example is a time-aligned speaker matrix. Adjacent columns with the same active-speaker "
+        "set are compacted into one row; an em dash means that agent was silent. This keeps overlap, "
+        "silence, and handoffs visible while remaining readable.",
         "",
     ]
     for source in SOURCES:
@@ -226,33 +288,17 @@ def render_markdown(chosen: dict[str, list[dict]]) -> str:
                     "",
                     f"Judge score: model **{example['judge_score_model']:.3f}**, human {example['judge_score_human']:.3f}. Clean handoffs (model): **{example['clean_handoffs_model']}**.",
                     "",
-                    "**Prefix (by agent)**",
-                    "",
-                    _md_agents(example["prefix_by_agent"]),
-                    "",
-                    "**Human continuation (by agent)**",
-                    "",
-                    _md_agents(example["human_by_agent"]),
-                    "",
-                    "**MatrixChat continuation (by agent)**",
-                    "",
-                    _md_agents(example["model_by_agent"]),
-                    "",
-                    "<details><summary>Turn view</summary>",
-                    "",
                     "**Prefix**",
                     "",
-                    _md_turns(example["prefix_turns"]),
+                    _md_matrix(example["prefix_matrix"]),
                     "",
-                    "**Human**",
+                    "**Human continuation**",
                     "",
-                    _md_turns(example["human_turns"]),
+                    _md_matrix(example["human_matrix"]),
                     "",
-                    "**MatrixChat**",
+                    "**MatrixChat continuation**",
                     "",
-                    _md_turns(example["model_turns"]),
-                    "",
-                    "</details>",
+                    _md_matrix(example["model_matrix"]),
                     "",
                 ]
             )

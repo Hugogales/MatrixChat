@@ -1,0 +1,51 @@
+{
+  "stage_steps": 1500,
+  "development_contract": "/home/ad.msoe.edu/garrido-lestacheh/UR/MatrixChat/logs/final_runs_20260814/contracts/development_screening.json",
+  "output_root": "/home/ad.msoe.edu/garrido-lestacheh/UR/MatrixChat/logs/final_runs_20260814_wave3_stage2",
+  "runs": [
+    {
+      "run_name": "final3_h100_c106_s2106",
+      "gpu": "h100",
+      "source_config": "hyperparameters/h100p3_cand_00106.json",
+      "seed": 2106,
+      "processed_data_dir": "/home/ad.msoe.edu/garrido-lestacheh/matrixchat/processed_final_20260814_lookback192_allspk",
+      "resume_from": "/home/ad.msoe.edu/garrido-lestacheh/UR/MatrixChat/checkpoints/final_h100_c106_s2106"
+    },
+    {
+      "run_name": "final3_h100_c106_s3106",
+      "gpu": "h100",
+      "source_config": "hyperparameters/h100p3_cand_00106.json",
+      "seed": 3106,
+      "processed_data_dir": "/home/ad.msoe.edu/garrido-lestacheh/matrixchat/processed_final_20260814_lookback192_allspk",
+      "resume_from": "/home/ad.msoe.edu/garrido-lestacheh/UR/MatrixChat/checkpoints/final_h100_c106_s3106"
+    },
+    {
+      "run_name": "final3_h100_c106_s4106",
+      "gpu": "h100",
+      "source_config": "hyperparameters/h100p3_cand_00106.json",
+      "seed": 4106,
+      "processed_data_dir": "/home/ad.msoe.edu/garrido-lestacheh/matrixchat/processed_final_20260814_lookback192_allspk",
+      "resume_from": "/home/ad.msoe.edu/garrido-lestacheh/UR/MatrixChat/checkpoints/final_h100_c106_s4106"
+    },
+    {
+      "run_name": "final3_h100_c103safe_s3103",
+      "gpu": "h100",
+      "source_config": "hyperparameters/h100p3_cand_00103.json",
+      "seed": 3103,
+      "processed_data_dir": "/home/ad.msoe.edu/garrido-lestacheh/matrixchat/processed_final_20260814_lookback192_allspk",
+      "resume_from": "/home/ad.msoe.edu/garrido-lestacheh/UR/MatrixChat/checkpoints/final_h100_c103_s3103",
+      "overrides": {
+        "batch_size": 4,
+        "gradient_accumulation_steps": 8
+      }
+    },
+    {
+      "run_name": "final3_h100_c145_s2145",
+      "gpu": "h100",
+      "source_config": "hyperparameters/h100p3_cand_00145.json",
+      "seed": 2145,
+      "processed_data_dir": "/home/ad.msoe.edu/garrido-lestacheh/matrixchat/processed_final_20260814_lookback192_allspk",
+      "resume_from": "/home/ad.msoe.edu/garrido-lestacheh/UR/MatrixChat/checkpoints/final_h100_c145_s2145"
+    }
+  ]
+}

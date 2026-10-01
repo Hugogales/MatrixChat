@@ -118,6 +118,10 @@ def training_command(config: dict, ticket: dict) -> list[str]:
         str(config["lambda_activity"]),
         "--lambda_reward",
         str(config["lambda_reward"]),
+        "--lambda_repetition_penalty",
+        str(config.get("lambda_repetition_penalty", 0.0)),
+        "--repetition_window",
+        str(config.get("repetition_window", 16)),
         "--activity_pos_weight",
         str(config["activity_pos_weight"]),
         # 2026-08-24 reward rearchitecture (model/turn_reward.py's
@@ -138,6 +142,8 @@ def training_command(config: dict, ticket: dict) -> list[str]:
         str(config.get("floor_control_adaptive_weight_alpha", 0.0)),
         "--floor_control_adaptive_prior_strength",
         str(config.get("floor_control_adaptive_prior_strength", 32.0)),
+        "--floor_control_weight_overlap",
+        str(config.get("floor_control_weight_overlap", 1.0)),
         "--speak_grace",
         "5",
         "--speak_tau",
@@ -300,6 +306,7 @@ def training_command(config: dict, ticket: dict) -> list[str]:
             "agent_dynamic_state_mode": config.get(
                 "agent_dynamic_state_mode", "none"
             ),
+            "agent_dynamic_state_dim": config.get("agent_dynamic_state_dim", 64),
         }
         for key, value in expected_arch.items():
             if previous.get(key, value) != value:

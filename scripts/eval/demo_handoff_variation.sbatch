@@ -1,4 +1,37 @@
 #!/bin/bash
+# Run the 576-trial broad handoff probe for a frozen checkpoint.
+#SBATCH --account=undergrad_research
+#SBATCH --job-name=matrix_broad_probe
+#SBATCH --partition=dgx
+#SBATCH --gres=gpu:v100:1
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=56G
+#SBATCH --time=08:00:00
+#SBATCH --output=logs/slurm/%x_%j.out
+#SBATCH --error=logs/slurm/%x_%j.err
+
+set -euo pipefail
+CHECKPOINT_DIR="${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}"
+OUTPUT="${OUTPUT:?Set OUTPUT}"
+MODEL_PATH="${MODEL_PATH:-models/Qwen3-4B-Instruct-2507}"
+CONTAINER="${CONTAINER:-/data/containers/msoe-tf2x.sif}"
+
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+
+mkdir -p "$(dirname "$OUTPUT")"
+singularity exec --nv -B /data:/data "$CONTAINER" \
+  python scripts/eval/demo_handoff_variation.py \
+    --checkpoint_dir "$CHECKPOINT_DIR" \
+    --model_path "$MODEL_PATH" \
+    --output "$OUTPUT" \
+    --max_new_tokens "${MAX_NEW_TOKENS:-48}" \
+    --temperature "${TEMPERATURE:-0.8}" \
+    --activity_threshold "${ACTIVITY_THRESHOLD:-0.5}" \
+    --max_chain_links "${MAX_CHAIN_LINKS:-3}"
+#!/bin/bash
 # Full sweep: prompts x agent-counts x seeds x context-kinds (cold, primed
 # handoff with 0/3-column gap, post-intro, lengthy conversation), with
 # chain-continuation to look for 2nd/3rd handoffs -- see

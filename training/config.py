@@ -202,6 +202,18 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Weight for the (negated) differentiable turn-taking reward "
                              "vs content CE; loss -= lambda_reward * mean_reward.")
     parser.add_argument(
+        "--lambda_repetition_penalty",
+        type=float,
+        default=0.0,
+        help="Weight for recent same-row non-target token reuse unlikelihood loss.",
+    )
+    parser.add_argument(
+        "--repetition_window",
+        type=int,
+        default=16,
+        help="Recent same-row token window for --lambda_repetition_penalty.",
+    )
+    parser.add_argument(
         "--lambda_same_handoff",
         type=float,
         default=0.0,
@@ -506,6 +518,10 @@ def validate_args(args) -> None:
             raise ValueError(f"{name} must be >= 0")
     if args.lambda_l2sp < 0:
         raise ValueError("lambda_l2sp must be >= 0")
+    if args.lambda_repetition_penalty < 0:
+        raise ValueError("lambda_repetition_penalty must be >= 0")
+    if args.repetition_window < 1:
+        raise ValueError("repetition_window must be >= 1")
     if args.silence_tau <= 0 or args.overlap_tau <= 0:
         raise ValueError("silence_tau and overlap_tau must be > 0")
     if args.overlap_base_weight < 0:

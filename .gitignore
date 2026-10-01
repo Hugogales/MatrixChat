@@ -31,3 +31,9 @@ data/**/*.jsonl
 data/**/*.parquet
 !data/README.md
 !data/dataset_plan.md
+
+# Release bundles retain checked-in instructions/metadata but not large weights
+# or locally-produced archives.
+release_artifacts/**/*.zip
+release_artifacts/**/model_state.pt
+release_artifacts/**/*.safetensors

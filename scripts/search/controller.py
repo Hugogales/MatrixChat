@@ -171,9 +171,13 @@ def initial_state(config: dict) -> dict:
 
 def _sample_random_point(state: dict, number: int) -> dict:
     rng = random.Random(state["config"]["search_seed"] + number)
-    base = rng.uniform(0.6, 2.0)
-    maximum = rng.uniform(max(base + 0.8, 2.0), 6.0)
     config = state["config"]
+    base = rng.choice(config.get("overlap_base_weight_choices", [])) if config.get(
+        "overlap_base_weight_choices"
+    ) else rng.uniform(0.6, 2.0)
+    maximum = rng.choice(config.get("overlap_max_weight_choices", [])) if config.get(
+        "overlap_max_weight_choices"
+    ) else rng.uniform(max(base + 0.8, 2.0), 6.0)
     # Choice lists are configurable per-search (e.g. an 80GB-H100 search can
     # widen batch_size/max_flat_len/lora_r well beyond the defaults tuned for
     # smaller GPUs) but default to exactly the original fixed lists so any
@@ -186,21 +190,35 @@ def _sample_random_point(state: dict, number: int) -> dict:
     )
     return {
         "context_lookback_columns": rng.choice([64, 128, 192]),
-        "activity_pos_weight": round(rng.uniform(0.70, 0.90), 3),
+        "activity_pos_weight": rng.choice(
+            config.get("activity_pos_weight_choices", [])
+        ) if config.get("activity_pos_weight_choices") else round(rng.uniform(0.70, 0.90), 3),
         "overlap_base_weight": round(base, 3),
         "overlap_max_weight": round(maximum, 3),
-        "overlap_grace": rng.choice([0, 1]),
-        "overlap_tau": rng.choice([1, 2, 3, 5]),
-        "handoff_bonus_weight": round(rng.uniform(0.25, 1.75), 3),
+        "overlap_grace": rng.choice(config.get("overlap_grace_choices", [0, 1])),
+        "overlap_tau": rng.choice(config.get("overlap_tau_choices", [1, 2, 3, 5])),
+        "handoff_bonus_weight": rng.choice(
+            config.get("handoff_bonus_weight_choices", [])
+        ) if config.get("handoff_bonus_weight_choices") else round(rng.uniform(0.25, 1.75), 3),
         "lambda_activity": rng.choice(
             config.get("lambda_activity_choices", [0.5, 0.75, 1.0])
         ),
-        "lambda_reward": rng.choice([0.05, 0.10, 0.20]),
+        "lambda_reward": rng.choice(
+            config.get("lambda_reward_choices", [0.05, 0.10, 0.20])
+        ),
+        "lambda_repetition_penalty": rng.choice(
+            config.get("lambda_repetition_penalty_choices", [0.0])
+        ),
+        "repetition_window": rng.choice(
+            config.get("repetition_window_choices", [16])
+        ),
         "gradient_accumulation_steps": rng.choice(gradient_accumulation_choices),
         "batch_size": rng.choice(batch_size_choices),
         "max_flat_len": rng.choice(max_flat_len_choices),
         "lora_r": rng.choice(lora_r_choices),
-        "learning_rate": rng.choice([5e-5, 7.5e-5, 1e-4]),
+        "learning_rate": rng.choice(
+            config.get("learning_rate_choices", [5e-5, 7.5e-5, 1e-4])
+        ),
         "dataset_weights": rng.choice(
             config.get(
                 "dataset_weight_choices",
@@ -210,7 +228,9 @@ def _sample_random_point(state: dict, number: int) -> dict:
                 ],
             )
         ),
-        "sampling_strategy": rng.choice(["probabilistic", "balanced_cycle"]),
+        "sampling_strategy": rng.choice(
+            config.get("sampling_strategy_choices", ["probabilistic", "balanced_cycle"])
+        ),
         "agent_attention_mode": rng.choice(
             config.get(
                 "agent_attention_mode_choices", ["none", "qkv", "qkv_gated"]
@@ -265,11 +285,17 @@ def _sample_random_point(state: dict, number: int) -> dict:
         "agent_dynamic_state_mode": rng.choice(
             config.get("agent_dynamic_state_mode_choices", ["none", "gru"])
         ),
+        "agent_dynamic_state_dim": rng.choice(
+            config.get("agent_dynamic_state_dim_choices", [64])
+        ),
         "floor_control_adaptive_weight_alpha": rng.choice(
             config.get(
                 "floor_control_adaptive_weight_alpha_choices",
                 [0.0, 0.25, 0.5, 0.75, 1.0],
             )
+        ),
+        "floor_control_weight_overlap": rng.choice(
+            config.get("floor_control_weight_overlap_choices", [1.0])
         ),
     }
 
@@ -337,8 +363,12 @@ def sample_candidate(
 
     optimizer = str(state["config"].get("optimizer", "random"))
     trial_number = None
+    seeded_overrides = state["config"].get("seed_candidate_overrides", [])
     exploration_quota = int(state["config"].get("exploration_quota", 0))
-    if number <= exploration_quota:
+    if number <= len(seeded_overrides):
+        sampled = _sample_random_point(state, number)
+        sampled.update(seeded_overrides[number - 1])
+    elif number <= exploration_quota:
         sampled = _sample_stratified_point(state, number)
     elif optimizer == "tpe" and paths is not None and bayes_opt is not None:
         study = get_study(paths, state)
@@ -350,9 +380,6 @@ def sample_candidate(
         "candidate_id": candidate_id,
         "seed": 1000 + number,
         "model_path": state["config"]["model_path"],
-        "processed_data_dir": state["config"]["processed_dirs"][
-            str(sampled["context_lookback_columns"])
-        ],
         "gradient_checkpointing": False,
         "num_epochs": 2,
         "max_grad_norm": 1.0,
@@ -369,6 +396,10 @@ def sample_candidate(
         config["processed_data_dir"] = state["config"]["processed_dirs"].get(
             "192_allspk", state["config"]["processed_dirs"]["192"]
         )
+    else:
+        config["processed_data_dir"] = state["config"]["processed_dirs"][
+            str(config["context_lookback_columns"])
+        ]
     # Memory-aware sampling. The attention implementation is quadratic in
     # flattened length; a true batch of several long examples can exceed even
     # 80GB. This is a deterministic function of batch_size, not an

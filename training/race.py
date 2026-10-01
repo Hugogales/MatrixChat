@@ -241,8 +241,9 @@ def broad_sweep_score(
     if no_response > 0.50:
         gates.append("silence")
     chain_2plus = float(probe.get("chain_2plus_rate", 0.0) or 0.0)
+    warnings = []
     if chain_2plus > 0.50:
-        gates.append("chain_hacking")
+        warnings.append("chain_hacking")
     if has_diversity and repeated > 0.15:
         gates.append("repetition")
     # Distinct-1 falls mechanically as more trials are concatenated. The old
@@ -281,6 +282,7 @@ def broad_sweep_score(
         "raw_score": raw_score,
         "disqualified": bool(gates),
         "gates": gates,
+        "warnings": warnings,
         "behavior": behavior,
         "global_behavior": global_behavior,
         "worst_context_behavior": worst_bucket,

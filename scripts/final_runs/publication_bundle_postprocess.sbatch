@@ -81,6 +81,7 @@ singularity exec -B /data:/data "$CONTAINER" \
     --checkpoint-label "$CHECKPOINT_LABEL" \
     --baseline-summary "$BASELINE_SUMMARY" \
     --baseline-stats "$BASELINE_STATS" \
-    --baseline-label "final40_h100_c106_s176106 (paper baseline, 1500 steps)"
+    --baseline-label "final40_h100_c106_s176106 (paper baseline, 1500 steps)" \
+    --best-conversations "$BEST/best_conversations.md"
 
 echo "[info] publication bundle complete under $OUTPUT_DIR"

@@ -14,10 +14,10 @@ Every ``--interval-seconds`` tick:
    (lowest-sunk-cost-first, approximated by shortest elapsed runtime) to
    free the space. Also cancels any of our jobs whose ``Dependency`` chains
    back to a cancelled job, so an ``afterok`` eval doesn't refill the node.
-3. For each foreign job we're already accommodating: once it transitions to
-   RUNNING or leaves the queue entirely, releases our holds and attempts to
-   resubmit whatever we cancelled for it (best-effort -- see "Reclaim
-   mechanism" below).
+3. For each foreign job we're already accommodating: keep our capacity held
+   while it is PENDING or RUNNING. Only after it leaves the queue entirely
+   do we release our holds and resume/requeue our work (best-effort -- see
+   "Reclaim mechanism" below).
 
 Every action is appended to ``logs/gpu_yield_daemon/decisions.jsonl`` and
 printed to stdout (captured in the sbatch ``.out`` file), so a human
@@ -121,11 +121,9 @@ DEFAULT_PARTITIONS = ["dgx", "dgxh100"]
 NODE_MEM_THRESHOLD_MB = {"dgx": 420000.0, "dgxh100": 600000.0}
 DEFAULT_PROTECT_PATTERN = r"final_test|paper_results|frozen|sealed"
 DEFAULT_RESUME_STEP_INCREMENT = 2000
-# 2 DGX/V100 nodes (8 GPUs/node, confirmed via `sinfo -p dgx -o "%N %G"`) and
-# 4 H100 GPUs -- the user's standing GPU-usage cap (2026-08-10). The queue
-# never auto-submits a job that would push total RUNNING usage past this,
-# but does NOT itself enforce the cap on jobs submitted outside the queue.
-DEFAULT_BUDGET_GPUS = {"dgx": 16, "dgxh100": 4}
+# Use every otherwise-idle V100 and all but one H100 under the explicit
+# September 17 direction, while yielding immediately to any foreign demand.
+DEFAULT_BUDGET_GPUS = {"dgx": 24, "dgxh100": 7}
 # When the daemon submits a queued entry, pass partition-appropriate Slurm
 # resource requests on the command line (overriding any mismatched #SBATCH
 # defaults baked into the .sbatch script, e.g. evaluate_final_checkpoint.sbatch
@@ -550,9 +548,15 @@ class Daemon:
         this tick's own yield-cancellations), so a GPU just vacated for a
         foreign job is never immediately re-filled in the same tick."""
 
+        protected_partitions = {
+            record["partition"] for record in self.state["vacated"].values()
+        }
+
         def _mutate(entries):
             changed = False
             for partition in self.partitions:
+                if partition in protected_partitions:
+                    continue
                 budget = self.budget.get(partition)
                 if budget is None:
                     continue
@@ -589,7 +593,7 @@ class Daemon:
         by_job_id = {j["job_id"]: j for jobs in all_jobs.values() for j in jobs}
         for foreign_job_id in list(self.state["vacated"].keys()):
             current = by_job_id.get(foreign_job_id)
-            if current is None or current["state"] != "PENDING":
+            if current is None:
                 self.reclaim(foreign_job_id)
 
         self.sync_queue_with_slurm(all_jobs)

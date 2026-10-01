@@ -47,6 +47,7 @@ from dataclasses import dataclass
 from typing import Callable, Dict, Iterator, List, Optional, Tuple
 
 from .conversation_quality import attach_quality_fields
+from .overlap_cleaner import clean_timed_conversation
 from .schema import Conversation, ROLE_ASSISTANT, TimedWord
 
 Tokenize = Callable[[str], List[int]]
@@ -93,6 +94,12 @@ class ConvertConfig:
     # the original assistant/preselected/random-target behavior.
     # ``all_speakers`` supervises every speaking row in content-bearing data.
     content_supervision_mode: str = "target_only"
+    # Optional coherence-safe cleanup for timed sources. Short overlap is
+    # retained; longer interruptions move as whole utterances before render.
+    clean_timed_overlaps: bool = False
+    ami_overlap_keep_tokens: int = 2
+    werewolf_overlap_keep_tokens: int = 3
+    clean_inter_turn_gap_seconds: float = 0.05
 
     def __post_init__(self) -> None:
         if self.content_supervision_mode not in CONTENT_SUPERVISION_MODES:
@@ -101,6 +108,8 @@ class ConvertConfig:
                 f"content_supervision_mode must be one of: {choices}; "
                 f"got {self.content_supervision_mode!r}"
             )
+        if self.ami_overlap_keep_tokens < 0 or self.werewolf_overlap_keep_tokens < 0:
+            raise ValueError("overlap keep thresholds must be non-negative")
 
 
 def _content_rows(
@@ -513,6 +522,18 @@ def convert_timed_conversation(
     rng: random.Random,
 ) -> List[Dict]:
     """Convert a timed conversation to overlap/pause-aware matrix chunks."""
+    if cfg.clean_timed_overlaps and conv.source in {"ami", "werewolf"}:
+        threshold = (
+            cfg.ami_overlap_keep_tokens
+            if conv.source == "ami"
+            else cfg.werewolf_overlap_keep_tokens
+        )
+        conv = clean_timed_conversation(
+            conv,
+            tokenize,
+            overlap_keep_tokens=threshold,
+            inter_turn_gap_seconds=cfg.clean_inter_turn_gap_seconds,
+        )
     appear: List[int] = []
     for turn in conv.turns:
         if turn.speaker not in appear:

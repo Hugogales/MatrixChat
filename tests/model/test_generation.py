@@ -2,6 +2,9 @@ import torch
 
 from model.matrix_qwen import MatrixQwenForCausalLM
 from model.generation import (
+    _decide_and_sample,
+    _silence_rescue_controls,
+    _trailing_silence_columns,
     generate_matrix,
     generate_next_tokens_for_all_agents,
     generation_topology_summary,
@@ -57,6 +60,48 @@ def test_generation_activity_threshold_gates_speaking(tiny_model, matrix_config)
 
     _, speak_none = generate_next_tokens_for_all_agents(model, input_ids, activity_threshold=2.0)
     assert not bool(speak_none.any())
+
+
+def test_silence_rescue_forces_only_highest_probability_agent():
+    content = torch.zeros((1, 3, 5))
+    content[:, :, 3] = 1.0
+    activity = torch.tensor([[-2.0, -0.1, -1.0]])
+    tokens, speak = _decide_and_sample(
+        content,
+        activity,
+        temperature=0.0,
+        activity_threshold=0.5,
+        placeholder_token_id=0,
+        force_speaker=torch.tensor([True]),
+    )
+
+    assert torch.equal(speak, torch.tensor([[False, True, False]]))
+    assert tokens[0, 1] != 0
+
+
+def test_trailing_silence_count_tracks_only_contiguous_suffix():
+    activity = torch.tensor([[[True, False, False], [False, False, False]]])
+    assert _trailing_silence_columns(activity).tolist() == [2]
+
+
+def test_silence_rescue_ends_on_third_trigger():
+    streak = torch.tensor([5])
+    rescues = torch.tensor([0])
+    finished = torch.tensor([False])
+
+    force, finished, rescues = _silence_rescue_controls(
+        streak, rescues, finished, after_columns=5, end_after_triggers=3
+    )
+    assert force.tolist() == [True]
+    assert finished.tolist() == [False]
+    assert rescues.tolist() == [1]
+
+    force, finished, rescues = _silence_rescue_controls(
+        streak, torch.tensor([2]), finished, after_columns=5, end_after_triggers=3
+    )
+    assert force.tolist() == [False]
+    assert finished.tolist() == [True]
+    assert rescues.tolist() == [3]
 
 
 def test_generate_matrix_shapes_and_yield_placeholder(tiny_model, matrix_config):

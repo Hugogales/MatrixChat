@@ -55,13 +55,15 @@ Paired comparison (274173 `turn_reward_mode=linear` control vs 274174
 otherwise identical, both ran the full 2000/2000 steps overnight during a
 ~14h local shell outage, zero intervention needed, zero tracebacks):
 
+
 | metric (final, step2000 in-training probe) | `linear` | `balanced_ce` |
-|---|---|---|
-| `clean_handoff_rate` | 0.20 | **0.60** |
-| `no_listener_response_rate` | 0.80 | 0.30 |
-| `overlap_rate` | 0.05 | 0.20 |
-| `repeated_4gram_fraction` | 0.068 | 0.012 |
-| `val_loss` | 4.351 | 4.330 |
+| ------------------------------------------ | -------- | ------------- |
+| `clean_handoff_rate`                       | 0.20     | **0.60**      |
+| `no_listener_response_rate`                | 0.80     | 0.30          |
+| `overlap_rate`                             | 0.05     | 0.20          |
+| `repeated_4gram_fraction`                  | 0.068    | 0.012         |
+| `val_loss`                                 | 4.351    | 4.330         |
+
 
 Not a one-off reading: `clean_handoff_rate` for `balanced_ce` sat in
 0.5-0.8 for every probe from step500 onward (500=0.7, 1000=0.7, 1500=0.8,
@@ -76,21 +78,20 @@ full fixed-suite probe (`scripts/eval/evaluate_checkpoint_suite.py`) against
 both final checkpoints and read every `handoff`-kind example's raw
 per-agent `outputs`. Two concrete findings:
 
-- **`linear`'s own only "clean" handoff example in the 10-prompt suite is
-  actually an echo artifact, not real turn-taking**: prompted with
-  "honestly i thought we played really well so what do you all think",
-  agent0 and agent2 both output "I thought we played really well too.
-  Yeah" -- verbatim identical text -- while `clean_handoff` scored `True`
-  because agent2 is a *different* agent than agent0, exactly the
-  near-echo failure mode `.cursor/rules/read-decoded-text-not-just-metrics.mdc`
-  warns can fool this exact metric.
-- **Every one of `balanced_ce`'s 6 clean-handoff examples shows genuinely
-  distinct per-agent content**, e.g. same prompt -> `["?Yeah", "I thought
-  we won.", "You were a little bit high."]`; another ->
-  `["?Oh, I'm just gonna have", "Okay.", ""]`. No verbatim repetition
-  across agents, no in-turn self-repetition, no token-spam. The one
-  overlap example (`[".I think it", "So so", ""]`) shows a plausible
-  mid-word interruption fragment, not degenerate babble.
+- `linear`**'s own only "clean" handoff example in the 10-prompt suite is
+actually an echo artifact, not real turn-taking**: prompted with
+"honestly i thought we played really well so what do you all think",
+agent0 and agent2 both output "I thought we played really well too.
+Yeah" -- verbatim identical text -- while `clean_handoff` scored `True`
+because agent2 is a *different* agent than agent0, exactly the
+near-echo failure mode `.cursor/rules/read-decoded-text-not-just-metrics.mdc`
+warns can fool this exact metric.
+- **Every one of** `balanced_ce`**'s 6 clean-handoff examples shows genuinely
+distinct per-agent content**, e.g. same prompt -> `["?Yeah", "I thought we won.", "You were a little bit high."]`; another ->
+`["?Oh, I'm just gonna have", "Okay.", ""]`. No verbatim repetition
+across agents, no in-turn self-repetition, no token-spam. The one
+overlap example (`[".I think it", "So so", ""]`) shows a plausible
+mid-word interruption fragment, not degenerate babble.
 
 **Caveat (per this doc's own standing convention)**: this is still only a
 10-prompt small-suite result on one seed -- treat as a strong *lead*, not
@@ -106,14 +107,16 @@ redundant with it.
 `scripts/eval/demo_handoff_variation.py` (6 prompts x 4 agent-counts x 4
 seeds x 6 context-kinds, stochastic sampling) against both final checkpoints:
 
-| metric | `linear` | `balanced_ce` |
-|---|---|---|
-| `clean_handoff_rate` | 20.5% | **37.5%** |
-| `handoff_rate_lenient` | 35.8% | **61.1%** |
-| `no_listener_response_rate` | 39.4% | **11.3%** |
-| `chain_2plus_rate` | 4.9% | **7.3%** |
-| `chain_3plus_rate_lenient` | 3.0% | 3.6% |
-| `overlap_rate` | 39.6% | 50.0% (known, expected tradeoff) |
+
+| metric                      | `linear` | `balanced_ce`                    |
+| --------------------------- | -------- | -------------------------------- |
+| `clean_handoff_rate`        | 20.5%    | **37.5%**                        |
+| `handoff_rate_lenient`      | 35.8%    | **61.1%**                        |
+| `no_listener_response_rate` | 39.4%    | **11.3%**                        |
+| `chain_2plus_rate`          | 4.9%     | **7.3%**                         |
+| `chain_3plus_rate_lenient`  | 3.0%     | 3.6%                             |
+| `overlap_rate`              | 39.6%    | 50.0% (known, expected tradeoff) |
+
 
 This is now a fully verified result, not just a small-suite lead: nearly 2x
 the clean handoffs, listeners silent 3.5x less often, real (if modest) gains
@@ -132,11 +135,13 @@ context over time, part of the broader agent-encoding redesign). Paired
 arms, exact leader recipe otherwise identical: `dynstate_gru_linear_s176106`
 vs `dynstate_gru_balcecfg_s176106`, both ran the full 2000/2000 steps.
 
+
 | metric (final, step2000 in-training probe) | `dynstate`+`linear` | `dynstate`+`balanced_ce` |
-|---|---|---|
-| `clean_handoff_rate` | 0.0 | **0.8** |
-| `no_listener_response_rate` | 1.0 | 0.2 |
-| `repeated_4gram_fraction` | 0.020 | 0.026 |
+| ------------------------------------------ | ------------------- | ------------------------ |
+| `clean_handoff_rate`                       | 0.0                 | **0.8**                  |
+| `no_listener_response_rate`                | 1.0                 | 0.2                      |
+| `repeated_4gram_fraction`                  | 0.020               | 0.026                    |
+
 
 `dynstate`+`balanced_ce`'s `clean_handoff_rate` trajectory (step500-2000:
 0.3, 0.3, 0.6, 0.7, 0.7, 0.6, 0.8) sat at or above the non-dynstate
@@ -153,8 +158,7 @@ own).
 **Verified via decoded text** (re-probed the final checkpoints with
 `evaluate_checkpoint_suite.py`'s fixed 20-example suite, `clean_handoff_rate`
 0.7 there): all 7 clean-handoff examples in `dynstate`+`balanced_ce`'s suite
-show genuinely distinct per-agent text, e.g. `["?Yeah.", "That was good.",
-""]` and `["?", "Mm-hmm.", ""]` -- no verbatim echo across agents, no
+show genuinely distinct per-agent text, e.g. `["?Yeah.", "That was good.", ""]` and `["?", "Mm-hmm.", ""]` -- no verbatim echo across agents, no
 vocabulary leakage. One (out of 20) mild self-repetition artifact was found
 (`".So, so,so, so, having a remote"`) -- a real but minor imperfection, not
 disqualifying. `dynstate`+`linear`'s suite confirmed 0/20 listener responses
@@ -197,10 +201,8 @@ NOT work for this source -- downloads happen lazily inside
 `iter_conversations` itself on first real iteration, same as Conversation
 Chronicles.
 
-**Next step, blocked on shell recovery**: authenticate (`huggingface-cli
-login` with a token from the user's now-approved account, or export
-`HF_TOKEN`), then `python -m data.build_dataset --mode peek --sources
-bazinga` to confirm the schema, fixing any field-name mismatches before a
+**Next step, blocked on shell recovery**: authenticate (`huggingface-cli login` with a token from the user's now-approved account, or export
+`HF_TOKEN`), then `python -m data.build_dataset --mode peek --sources bazinga` to confirm the schema, fixing any field-name mismatches before a
 real `--mode convert` + training-blend ablation.
 
 ## New data source built: When2Speak, structure-only like Molweni (08-24)
@@ -210,46 +212,48 @@ good data source. Findings, weighed against the standing priority order
 (varied agent count > grammar/spelling > human-sourced):
 
 - **Strong on agent-count variety and grammar**, same weakness as
-  Conversation Chronicles on the third axis: 216,800 (context, decision)
-  examples from 16,000 conversations with 2–6 anonymized human speakers
-  (`Speaker_0`...) plus one embedded `[AGENT]` deciding SPEAK-vs-SILENT at
-  every turn (~87%/13% realistic imbalance). Openly hosted, CC BY 4.0
-  (`hf.co/datasets/duke-trust-lab/When2Speak`), no gating unlike Bazinga!.
-  But every conversation is fully LLM-generated (GPT-4o-mini annotation +
-  GPT-4-Turbo transcript synthesis over Yahoo-Answers topical grounding) --
-  fails "human-sourced" outright, same core risk already flagged for
-  Conversation Chronicles (synthetic-fluency vs. the LLM-judge-artifact
-  confound).
+Conversation Chronicles on the third axis: 216,800 (context, decision)
+examples from 16,000 conversations with 2–6 anonymized human speakers
+(`Speaker_0`...) plus one embedded `[AGENT]` deciding SPEAK-vs-SILENT at
+every turn (~87%/13% realistic imbalance). Openly hosted, CC BY 4.0
+(`hf.co/datasets/duke-trust-lab/When2Speak`), no gating unlike Bazinga!.
+But every conversation is fully LLM-generated (GPT-4o-mini annotation +
+GPT-4-Turbo transcript synthesis over Yahoo-Answers topical grounding) --
+fails "human-sourced" outright, same core risk already flagged for
+Conversation Chronicles (synthetic-fluency vs. the LLM-judge-artifact
+confound).
 - **User's decision**: rather than gating this on the encoding redesign
-  (the Conversation-Chronicles plan), treat it like Molweni --
-  `content_bearing=False`, structure-only. This removes the synthetic-
-  fluency risk structurally (content CE never touches this text) while
-  keeping exactly the supervision this project's own evaluation has flagged
-  as the biggest current weakness: real SPEAK/SILENT floor-control decisions
-  at realistic class imbalance across a varied-size group.
+(the Conversation-Chronicles plan), treat it like Molweni --
+`content_bearing=False`, structure-only. This removes the synthetic-
+fluency risk structurally (content CE never touches this text) while
+keeping exactly the supervision this project's own evaluation has flagged
+as the biggest current weakness: real SPEAK/SILENT floor-control decisions
+at realistic class imbalance across a varied-size group.
 - Built `data/adapters/when2speak.py` (`source_id=6`, `default_weight=0.25`,
-  registered in `data/adapters/__init__.py`) plus
-  `tests/data/test_when2speak_adapter.py`. Uses the HF `dialogue` config (not
-  `token`) so SPEAK turns carry the agent's real generated text as raw input
-  (matches Molweni's rationale: even non-supervised text still shapes the
-  shared hidden representation the activity head reads). Added
-  `AdapterSpec.hf_config` (new field) and wired it into
-  `data/build_dataset.py::_download_one`'s generic `load_dataset` call, since
-  this HF repo has two named configs with no default and would otherwise
-  error on a bare `load_dataset(repo)` call.
+registered in `data/adapters/__init__.py`) plus
+`tests/data/test_when2speak_adapter.py`. Uses the HF `dialogue` config (not
+`token`) so SPEAK turns carry the agent's real generated text as raw input
+(matches Molweni's rationale: even non-supervised text still shapes the
+shared hidden representation the activity head reads). Added
+`AdapterSpec.hf_config` (new field) and wired it into
+`data/build_dataset.py::_download_one`'s generic `load_dataset` call, since
+this HF repo has two named configs with no default and would otherwise
+error on a bare `load_dataset(repo)` call.
 - **Known, documented tradeoff**: the HF release ships only an 8-message
-  sliding-window SFT format (~13.5 overlapping rows per original
-  conversation, no released conversation id), not raw full transcripts, so
-  the adapter emits one short `Conversation` per row rather than
-  reconstructing originals -- same one-row-per-episode pattern already used
-  for Conversation Chronicles (per-session) and MELD (per-scene). See the
-  adapter's module docstring for the full rationale.
+sliding-window SFT format (~13.5 overlapping rows per original
+conversation, no released conversation id), not raw full transcripts, so
+the adapter emits one short `Conversation` per row rather than
+reconstructing originals -- same one-row-per-episode pattern already used
+for Conversation Chronicles (per-session) and MELD (per-scene). See the
+adapter's module docstring for the full rationale.
 - **Not yet done** (blocked on this session's ~1.5-hour local shell outage,
-  see the reward-rearchitecture entry below for the same outage): raw
-  download, conversion into a comparison processed directory, and a
-  `--dataset_weights` ablation to confirm it actually helps floor-control
-  metrics before joining any default blend. See `docs/RESEARCH_REFERENCE.md`
-  §4.8 for the full writeup.
+see the reward-rearchitecture entry below for the same outage): raw
+download, conversion into a comparison processed directory, and a
+`--dataset_weights` ablation to confirm it actually helps floor-control
+metrics before joining any default blend. See `docs/RESEARCH_REFERENCE.md`
+§4.8 for the full writeup.
+
+
 
 ## Floor-control loss rearchitecture: `floor_control_reward` (08-24)
 
@@ -268,8 +272,9 @@ meaningful zero point is good, below is bad.
 **Root-cause analysis of the old linear reward's "discourages handoff"
 symptom.** Two structural issues, both traced to treating a per-column mean
 loss as if it were a temporally-discounted RL return:
+
 1. `p_overlap` is taxed from the very first unit of overlap probability
-   (`overlap_base_weight` applies immediately; only the RAMP to
+  (`overlap_base_weight` applies immediately; only the RAMP to
    `overlap_max_weight` is delayed by `overlap_grace`, unlike silence's
    genuine zero-penalty grace period). But a clean handoff, expressed as a
    continuous relaxation over per-agent probabilities, mechanically
@@ -286,7 +291,7 @@ loss as if it were a temporally-discounted RL return:
    setting, meaning every unit of transitional overlap-like mass is taxed
    immediately at `overlap_base_weight=1.674`.
 2. `speak_grace`/`speak_tau` import an RL-style "time constant" into
-   something that is not a discounted return -- "how long has this run
+  something that is not a discounted return -- "how long has this run
    lasted" is a fine FEATURE for the model to condition on via its own
    causal context, but hand-coding its effect via exponential decay tuned
    against columns (not real time) requires guessing a time constant
@@ -294,7 +299,7 @@ loss as if it were a temporally-discounted RL return:
    much larger than typical episode lengths that a fully-monopolizing
    agent barely sees its reward decay within a realistic training window.
 
-**New design: `floor_control_reward` (balanced 4-way proper scoring, zero
+**New design:** `floor_control_reward` **(balanced 4-way proper scoring, zero
 hand-tuned shape parameters).** Every column is classified into exactly one
 of SILENCE / SAME / HANDOFF / OVERLAP (ground truth from
 `carry_forward_owner_and_arrivals`'s gap-persistent owner tracking, fixing
@@ -349,56 +354,54 @@ Continuing the reward rearchitecture above under the user's explicit "keep
 trying ideas and launching jobs, don't stop to monitor" instruction, and the
 standing 2-DGX-node / 4-H100-GPU cap:
 
-- **DynamicAgentState (`model/dynamic_agent_state.py`) has been fully
-  implemented and flag-driven (`--agent_dynamic_state_mode gru`) for a while
-  but was never actually evaluated** -- its ablation was previously halted
-  by infra issues (CPU contention), not a negative result (see
-  `TRAINING_RUN_LOG.md`). Extended the reward comparison into a clean 2x2
-  factorial using the remaining 2 H100 GPU slots: `dynstate_gru_linear_s176106`
-  (paired against the existing 274173 linear control) and
-  `dynstate_gru_balcecfg_s176106` (paired against 274174's balanced_ce
-  treatment), both identical to the paper-leader recipe except
-  `agent_dynamic_state_mode=gru`. New sbatch:
-  `scripts/training/train_dynstate_ablation.sbatch` (every flag hardcoded
-  to match `hyperparameters/rewardredesign_*_s176106.json` exactly, so the
-  only intended delta from either control is this one flag). This uses all
-  4 of the allowed H100 GPUs; 2 DGX (V100) nodes remain fully free.
-- **Wired `turn_reward_mode` and `agent_dynamic_state_mode` into the HPO
-  search infrastructure** (`scripts/search/bayes_opt.py`'s `suggest_config`/
-  `distributions_for`, and `scripts/search/worker.py`'s `training_command`)
-  so a future search can treat both as genuinely open dimensions once their
-  respective comparisons land, rather than a hand-picked default baked into
-  the launcher. `agent_dynamic_state_mode` was added to `worker.py`'s
-  resume-guard `expected_arch` dict (it adds/removes a real GRU module, so a
-  resume across a changed value must be refused exactly like
-  `agent_attention_mode` already is) -- `turn_reward_mode` was deliberately
-  NOT added there since it changes only which loss is computed from
-  existing `activity_logits`, not any module's parameters. No search is
-  currently running, so this is safe groundwork, not a live search-space
-  edit (see `.cursor/rules/optuna-dynamic-search-space-either-direction.mdc`
-  -- any future search using these dimensions must start from a FRESH study,
-  never an old one with different history for these parameter names). 7 new/
-  extended unit tests in `tests/scripts/test_search_worker.py` and
-  `tests/scripts/test_search_bayes_opt.py`.
+- **DynamicAgentState (**`model/dynamic_agent_state.py`**) has been fully
+implemented and flag-driven (**`--agent_dynamic_state_mode gru`**) for a while
+but was never actually evaluated** -- its ablation was previously halted
+by infra issues (CPU contention), not a negative result (see
+`TRAINING_RUN_LOG.md`). Extended the reward comparison into a clean 2x2
+factorial using the remaining 2 H100 GPU slots: `dynstate_gru_linear_s176106`
+(paired against the existing 274173 linear control) and
+`dynstate_gru_balcecfg_s176106` (paired against 274174's balanced_ce
+treatment), both identical to the paper-leader recipe except
+`agent_dynamic_state_mode=gru`. New sbatch:
+`scripts/training/train_dynstate_ablation.sbatch` (every flag hardcoded
+to match `hyperparameters/rewardredesign_*_s176106.json` exactly, so the
+only intended delta from either control is this one flag). This uses all
+4 of the allowed H100 GPUs; 2 DGX (V100) nodes remain fully free.
+- **Wired** `turn_reward_mode` **and** `agent_dynamic_state_mode` **into the HPO
+search infrastructure** (`scripts/search/bayes_opt.py`'s `suggest_config`/
+`distributions_for`, and `scripts/search/worker.py`'s `training_command`)
+so a future search can treat both as genuinely open dimensions once their
+respective comparisons land, rather than a hand-picked default baked into
+the launcher. `agent_dynamic_state_mode` was added to `worker.py`'s
+resume-guard `expected_arch` dict (it adds/removes a real GRU module, so a
+resume across a changed value must be refused exactly like
+`agent_attention_mode` already is) -- `turn_reward_mode` was deliberately
+NOT added there since it changes only which loss is computed from
+existing `activity_logits`, not any module's parameters. No search is
+currently running, so this is safe groundwork, not a live search-space
+edit (see `.cursor/rules/optuna-dynamic-search-space-either-direction.mdc`
+-- any future search using these dimensions must start from a FRESH study,
+never an old one with different history for these parameter names). 7 new/
+extended unit tests in `tests/scripts/test_search_worker.py` and
+`tests/scripts/test_search_bayes_opt.py`.
 - **Molweni text quality: PTB-detokenization added on top of the existing
-  spelling-correction pass.** Inspecting real raw Molweni text (both
-  `iter_conversations` output and the underlying `DP/train.json`) showed the
-  actual on-disk text is PTB-tokenized -- `"i 'm writing"`, `"does n't"`,
-  `` "`` bridging ''" `` -- which is arguably a bigger legibility problem
-  than misspellings for this source. Added `detokenize_ptb` to
-  `data/adapters/_text_cleaning.py`, run before the spelling pass, verified
-  against real examples (`"llutz , you understand ... wants ?"` ->
-  `"llutz, you understand ... wants?"`; `` "for me it sounds like bridging , i 'm just not sure about the `` switch connection '' part"`` ->
-  `'for me it sounds like bridging, i\'m just not sure about the "switch connection" part'`).
-  Known accepted limitation: cannot distinguish a genuine sentence-final
-  period from a filename-extension separator that got a stray tokenizer
-  space (`"a .run file"` -> `"a.run file"`) -- rare, and moot either way
-  since Molweni is `content_bearing=False`. 4 new unit tests. Launched
-  `matrix_molweni_prep` (CPU-only, `teaching` partition, additive-only into
-  the frozen leader processed dir -- does not touch meld/ami/werewolf) to
-  make cleaned Molweni available for a future data-ablation comparison; not
-  yet added to any training run's `--dataset_weights` pending that
-  comparison.
+spelling-correction pass.** Inspecting real raw Molweni text (both
+`iter_conversations` output and the underlying `DP/train.json`) showed the
+actual on-disk text is PTB-tokenized -- `"i 'm writing"`, `"does n't"`,
+ `"` bridging ''" `-- which is arguably a bigger legibility problem than misspellings for this source. Added `detokenize_ptb` to `data/adapters/_text_cleaning.py`, run before the spelling pass, verified against real examples (`"llutz , you understand ... wants ?"` -> `"llutz, you understand ... wants?"`;` "for me it sounds like bridging , i 'm just not sure about the  `switch connection '' part"` ->
+`'for me it sounds like bridging, i\'m just not sure about the "switch connection" part'`).
+Known accepted limitation: cannot distinguish a genuine sentence-final
+period from a filename-extension separator that got a stray tokenizer
+space (`"a .run file"` -> `"a.run file"`) -- rare, and moot either way
+since Molweni is `content_bearing=False`. 4 new unit tests. Launched
+`matrix_molweni_prep` (CPU-only, `teaching` partition, additive-only into
+the frozen leader processed dir -- does not touch meld/ami/werewolf) to
+make cleaned Molweni available for a future data-ablation comparison; not
+yet added to any training run's `--dataset_weights` pending that
+comparison.
+
+
 
 ## Leader `final3_h100_c106_s2106` 576-trial probe (08-17 publication eval)
 
@@ -410,26 +413,31 @@ Broad stochastic handoff probe of the frozen leader (step 1500, temperature 0.8,
 - Independent 997-example paired continuation eval (temperature 1.0, 69 clusters) agrees on the same shape: overlap +14.5 pp vs human, mean turn length +115%, AMI speaker-change 12.3% → 2.1%.
 - Blinded LLM-as-judge on all 997 pairs (0 errors): geometric aggregate **0.619 human vs 0.519 model (−16%, BH p=0.002)**. All five axes are significant. The model is tagged off-topic 201 vs 80, silence 119 vs 48, babble 68 vs 8, echo 62 vs 22.
 
+
+
 ## Wave49 H100 seeds 247106–254106 did not beat 176106 (08-20)
 
 Temperature-1 60-example screens of eight candidate106 H100 seeds. Ranking comparison is vs `final40_h100_c106_s176106` under the 08-19 handoff definition (cluster clean **0.578**, AMI **0.100**).
 
-| Seed | Cluster clean | AMI | Werewolf | Notes |
-| ---: | ---: | ---: | ---: | --- |
-| 247106 | 0.402 | 0.05 | 0.60 | AMI-dead. AMI decoded includes `</</span>` and Werewolf “Bible Thumper”. |
-| 254106 | 0.391 | 0.05 | 0.47 | AMI-dead. |
-| 251106 | 0.385 | 0.05 | 0.40 | AMI-dead. |
-| 252106 | 0.343 | 0.10 | 0.40 | AMI still weak. |
-| 248106 | 0.299 | 0.15 | 0.37 | In-training 10-ex 0.7 did **not** hold. |
-| 250106 | 0.254 | 0.05 | 0.40 | AMI-dead. |
-| 249106 | 0.209 | 0.00 | 0.40 | AMI-dead. |
-| 253106 | 0.122 | 0.00 | 0.40 | AMI-dead. |
+
+| Seed   | Cluster clean | AMI  | Werewolf | Notes                                                                    |
+| ------ | ------------- | ---- | -------- | ------------------------------------------------------------------------ |
+| 247106 | 0.402         | 0.05 | 0.60     | AMI-dead. AMI decoded includes `</</span>` and Werewolf “Bible Thumper”. |
+| 254106 | 0.391         | 0.05 | 0.47     | AMI-dead.                                                                |
+| 251106 | 0.385         | 0.05 | 0.40     | AMI-dead.                                                                |
+| 252106 | 0.343         | 0.10 | 0.40     | AMI still weak.                                                          |
+| 248106 | 0.299         | 0.15 | 0.37     | In-training 10-ex 0.7 did **not** hold.                                  |
+| 250106 | 0.254         | 0.05 | 0.40     | AMI-dead.                                                                |
+| 249106 | 0.209         | 0.00 | 0.40     | AMI-dead.                                                                |
+| 253106 | 0.122         | 0.00 | 0.40     | AMI-dead.                                                                |
+
 
 Do not promote. Leader remains 176106. `final_test` stays sealed.
 
 ## Wave27 V100 seeds 101106 and 102106 are MELD-weighted false leads (08-17)
 
 Temperature-1 60-example screens vs leader 2106 cluster strict 0.201:
+
 - 101106: 0.185 overall, AMI 0.05 / MELD 0.20 / Werewolf 0.10.
 - 102106: 0.229 overall, **AMI 0.00** / MELD 0.25 / Werewolf 0.13.
 - Rest of wave27: 103106 0.141 (AMI 0.05), 104106 0.270 (AMI 0.00), 105106 0.272 (AMI 0.05), 106106 0.064 (AMI 0.00).
@@ -656,6 +664,8 @@ Link 3, Agent 1 -> Agent 3 -> Agent 0:
 | 40    | —                | —                                                                              | —       | —                                                         |
 | 41-45 | “Oh, thank God.” | —                                                                              | —       | —                                                         |
 | 46-47 | —                | —                                                                              | —       | —                                                         |
+
+
 
 
 This is not perfectly polished dialogue (“Fancy” / “Report” are semantically
@@ -1108,11 +1118,7 @@ synthetic cue). A2 stays silent throughout all 3 hops and is omitted below.
 | 19-47 | The mover doesn't move houses. Ooh, no. It's crazy! Ooh, no. I don't think he's gonna do |                                                      |
 
 
-This is a real, if slightly rambling and topic-drifting, 3-person
-conversation snippet with genuine back-and-forth engagement (note A1 even
-echoing A0's "it's just gonna look really stupid" phrase in Hop 1 --
-imperfect, but recognizably responsive dialogue, not template repetition).
-Combined with DJ's earlier (gated, trivial-content) example, this makes 2
+This is a real, if slightly rambling and topic-drifting, 3-person conversation snippet with genuine back-and-forth engagement (note A1 even echoing A0's "it's just gonna look really stupid" phrase in Hop 1 -- imperfect, but recognizably responsive dialogue, not template repetition). Combined with DJ's earlier (gated, trivial-content) example, this makes 2
 independent chain_3plus confirmations total out of ~2100 cumulative
 broad-sweep trials -- still rare, but no longer a single fluke, and now
 with at least one non-gated, substantive instance. Treat `chain_3plus` as
@@ -1620,12 +1626,14 @@ Its score dropped from **11.30 (step1500) to 7.39 (step5000)**, and
 `h100_2026_08_phase3`. The 576-trial broad sweep confirms this is a real,
 broad-verified regression, not noise:
 
-| Metric (step1500 -> step5000) | step1500 | step5000 |
-| --- | ---: | ---: |
-| `clean_handoff_rate` | 36.8% | **26.7%** |
-| `listener_response_rate` | 62.3% | **49.1%** |
-| `overlap_rate` | 22.2% | 22.2% (unchanged) |
+
+| Metric (step1500 -> step5000)            | step1500      | step5000                             |
+| ---------------------------------------- | ------------- | ------------------------------------ |
+| `clean_handoff_rate`                     | 36.8%         | **26.7%**                            |
+| `listener_response_rate`                 | 62.3%         | **49.1%**                            |
+| `overlap_rate`                           | 22.2%         | 22.2% (unchanged)                    |
 | `distinct_1` / `repeated_4gram_fraction` | 0.084 / 20.2% | 0.110 / 15.4% (both slightly better) |
+
 
 This is exactly the failure mode already flagged as a risk in this same
 section (content loss overfitting past step1500-2500 while activity stayed
@@ -1683,12 +1691,14 @@ generates 48 columns, and mixes 2-5 agents plus six context kinds.
 Most importantly, the broad sweep itself shows a large agent-count split at
 the exact same frozen step1500 checkpoint:
 
+
 | agents | no listener response | per-listener-agent response | clean handoff | overlap |
 | ------ | -------------------- | --------------------------- | ------------- | ------- |
 | 2      | 55.6%                | 44.4%                       | 19.4%         | 20.8%   |
 | 3      | 56.9%                | 27.1%                       | 16.0%         | 22.9%   |
 | 4      | **15.3%**            | **39.8%**                   | **54.9%**     | 27.8%   |
 | 5      | 22.9%                | 25.3%                       | 56.9%         | 17.4%   |
+
 
 The candidate was trained with `num_agents=4`; thus its strongest result is
 concentrated at the training-time agent count, while 2-3-agent robustness is
@@ -1768,17 +1778,19 @@ raising handoff bonus to 1.7 is withdrawn.
 
 **Resolution of the paradox, from the frozen step1500 factorial diagnostic
 (job 271545, 720 factorial + 144 context trials) instrumented with
-autoregressive topology logging (`model/generation.py::generation_topology_summary`):**
+autoregressive topology logging (**`model/generation.py::generation_topology_summary`**):**
 the "3.2x too handoff-heavy" teacher-forced number and the "listener stays
 silent" autoregressive behavior are not actually in tension — they are two
 completely different operating regimes, and the second one is far more
 extreme than either the human target or the teacher-forced model:
 
-| Regime | same : handoff (unique-owner normalized) |
-| --- | --- |
-| Human validation target | 90.5% : 9.5% |
-| Candidate106 teacher-forced validation (step1500) | 69.4% : 30.6% |
-| Candidate106 **autoregressive soft** (own generated context, all agent counts/thresholds/temperatures) | **~98-99% : ~1-2%** |
+
+| Regime                                                                                                 | same : handoff (unique-owner normalized) |
+| ------------------------------------------------------------------------------------------------------ | ---------------------------------------- |
+| Human validation target                                                                                | 90.5% : 9.5%                             |
+| Candidate106 teacher-forced validation (step1500)                                                      | 69.4% : 30.6%                            |
+| Candidate106 **autoregressive soft** (own generated context, all agent counts/thresholds/temperatures) | **~98-99% : ~1-2%**                      |
+
 
 The autoregressive soft same/handoff ratio is essentially flat across the
 entire factorial grid — 3 vs. 4 agents, thresholds 0.35-0.60, temperature 0
@@ -1789,8 +1801,8 @@ ground-truth human activity, its true (pre-threshold) belief in a handoff
 collapses far below even its already-inflated teacher-forced number. The
 model was never trained on its own rollouts, so this is a straightforward
 exposure-bias / covariate-shift effect, not a contradiction in the earlier
-finding — it sharpens it. **Raising `activity_threshold` (0.5→0.6) does
-improve realized `clean_handoff_rate`** (e.g. 4 agents/temp0.8/horizon48:
+finding — it sharpens it. **Raising** `activity_threshold` **(0.5→0.6) does
+improve realized** `clean_handoff_rate` (e.g. 4 agents/temp0.8/horizon48:
 37.5%→58.3%, `no_listener_response_rate` 50.0%→33.3%), but the mechanism is
 not a fixed same/handoff calibration: it works by making it harder for the
 *reference* speaker to keep re-crossing threshold and continuing, which
@@ -1887,6 +1899,8 @@ Link 2 (Agent 3 takes it back, dirty handoff):
 | t27-t34 | .                                          | .       | .       | `Uh no,I don't think,` |
 | t35-t44 | .                                          | .       | .       | .                      |
 | t45-t47 | .                                          | .       | .       | `Pregame`              |
+
+
 
 
 A real multi-hop exchange with topical continuity, not overlapping in any
@@ -2209,10 +2223,12 @@ classifying it `self_resume` (same owner) or `handoff` (different owner) --
 directly comparable to `_boundary_handoff`. On the exact same validation
 mixture (MELD 0.15 / AMI 0.50 / Werewolf 0.35, `max_flat_len=2048`):
 
-| Measurement | Same-speaker / self-resume | Handoff |
-| --- | ---: | ---: |
-| Naive per-column marginal (previously reported target) | 90.5% | 9.5% |
-| **Run-boundary-conditioned (correct)** | **16.4%** | **83.6%** |
+
+| Measurement                                            | Same-speaker / self-resume | Handoff   |
+| ------------------------------------------------------ | -------------------------- | --------- |
+| Naive per-column marginal (previously reported target) | 90.5%                      | 9.5%      |
+| **Run-boundary-conditioned (correct)**                 | **16.4%**                  | **83.6%** |
+
 
 **The direction is inverted, not just imprecise.** This matches intuition
 once stated plainly: normal conversation is mostly people replying to each
@@ -2289,32 +2305,44 @@ the step500 probe) of two of the three reward-comparison arms
 continuation (51 generated columns, 5 agents), since the step500 in-training
 probes looked encouraging in isolation:
 
-| Arm | step500 probe (aggregate, small-suite) | This decoded example |
-| --- | --- | --- |
-| `reward_human_baseline` | `clean_handoff_rate=0.3` (best of any manual arm this cycle), `no_listener=0.4` | **Degenerate**: one agent monopolizes all 51 columns, repeating the identical sentence verbatim start to end; `repeated_4gram_fraction=0.8125`, `distinct_1=0.176` |
-| `reward_human_matched` | `no_listener_response_rate=0.1` (looked like the best "responsiveness" of the three), `overlap_rate=0.45` | **Severely degenerate**: 3 of 5 agents active simultaneously for essentially the whole window, all repeating the same short phrase; `overlap_rate=0.98`, `repeated_4gram_fraction=0.832`, `distinct_1=0.041` |
+
+| Arm                     | step500 probe (aggregate, small-suite)                                                                    | This decoded example                                                                                                                                                                                         |
+| ----------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `reward_human_baseline` | `clean_handoff_rate=0.3` (best of any manual arm this cycle), `no_listener=0.4`                           | **Degenerate**: one agent monopolizes all 51 columns, repeating the identical sentence verbatim start to end; `repeated_4gram_fraction=0.8125`, `distinct_1=0.176`                                           |
+| `reward_human_matched`  | `no_listener_response_rate=0.1` (looked like the best "responsiveness" of the three), `overlap_rate=0.45` | **Severely degenerate**: 3 of 5 agents active simultaneously for essentially the whole window, all repeating the same short phrase; `overlap_rate=0.98`, `repeated_4gram_fraction=0.832`, `distinct_1=0.041` |
+
+
+
 
 #### `reward_human_baseline` decoded continuation (agent4 = reference speaker)
 
-| time | Agent 0 | Agent 1 | Agent 2 | Agent 3 | Agent 4 |
-| --- | --- | --- | --- | --- | --- |
+
+| time   | Agent 0  | Agent 1  | Agent 2  | Agent 3  | Agent 4                                                                                                     |
+| ------ | -------- | -------- | -------- | -------- | ----------------------------------------------------------------------------------------------------------- |
 | t0-t50 | (silent) | (silent) | (silent) | (silent) | `I'm just going to open my eyes.` (repeated verbatim ~6x back-to-back, filling the entire 51-column window) |
+
+
+
 
 #### `reward_human_matched` decoded continuation (agent0, agent1, agent4 overlapping)
 
-| time | Agent 0 | Agent 1 | Agent 2 | Agent 3 | Agent 4 |
-| --- | --- | --- | --- | --- | --- |
+
+| time   | Agent 0                                               | Agent 1                                               | Agent 2  | Agent 3  | Agent 4                                                |
+| ------ | ----------------------------------------------------- | ----------------------------------------------------- | -------- | -------- | ------------------------------------------------------ |
 | t0-t50 | `I'm just kidding.` (repeated, active 88% of columns) | `I'm just kidding.` (repeated, active 98% of columns) | (silent) | (silent) | `I'm just kidding.` (repeated, active 100% of columns) |
 
-**Update: `reward_human_noreward` decoded the same way is also degenerate**,
+
+**Update:** `reward_human_noreward` **decoded the same way is also degenerate**,
 completing the three-way comparison (same held-out werewolf continuation,
 same `last`-checkpoint timing, all ~step580-620):
 
-| Arm | `repeated_4gram_fraction` | `distinct_1` | `overlap_rate` | Decoded pattern |
-| --- | ---: | ---: | ---: | --- |
-| `reward_human_baseline` | 0.812 | 0.176 | 0.0 | Agent 4 alone repeats `"I'm just going to open my eyes."` for the whole window |
-| `reward_human_noreward` | 0.537 | 0.120 | 0.627 | Agents 0 and 4 both repeat close variants of `"I'm just going to open my eyes."` simultaneously for most of the window |
-| `reward_human_matched` | 0.832 | 0.041 | 0.980 | Agents 0, 1, and 4 all repeat `"I'm just kidding."` simultaneously for nearly the whole window |
+
+| Arm                     | `repeated_4gram_fraction` | `distinct_1` | `overlap_rate` | Decoded pattern                                                                                                        |
+| ----------------------- | ------------------------- | ------------ | -------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `reward_human_baseline` | 0.812                     | 0.176        | 0.0            | Agent 4 alone repeats `"I'm just going to open my eyes."` for the whole window                                         |
+| `reward_human_noreward` | 0.537                     | 0.120        | 0.627          | Agents 0 and 4 both repeat close variants of `"I'm just going to open my eyes."` simultaneously for most of the window |
+| `reward_human_matched`  | 0.832                     | 0.041        | 0.980          | Agents 0, 1, and 4 all repeat `"I'm just kidding."` simultaneously for nearly the whole window                         |
+
 
 **All three reward-comparison arms are degenerate on this example at this
 training stage**, not just the two that looked most promising in aggregate.
@@ -2330,9 +2358,9 @@ three should be treated as already correct or ranked by their step500
 numbers alone. Re-decode all three again at a later step (1000+) before
 drawing conclusions about which reward design wins.
 
-**Update: `reward_human_baseline` re-decoded at step750 -- aggregate metrics
-improved further (clean_handoff_rate 0.3->0.4, `repeated_4gram_fraction`
-0.812->0.625, `distinct_1` 0.176->0.235) but the SAME held-out example is
+**Update:** `reward_human_baseline` **re-decoded at step750 -- aggregate metrics
+improved further (clean_handoff_rate 0.3->0.4,** `repeated_4gram_fraction`
+**0.812->0.625,** `distinct_1` **0.176->0.235) but the SAME held-out example is
 still degenerate**, just a milder flavor of the same failure. Reference
 speaker (agent4) still monopolizes all 51 generated columns
 (`active_column_rate=1.0`, all other 4 agents completely silent,
@@ -2340,9 +2368,11 @@ speaker (agent4) still monopolizes all 51 generated columns
 `boundary_handoff.clean=false`, `resolved_speaker=null`. The decoded text
 shifted from pure verbatim-sentence repetition to a self-referential loop:
 
-| time | Agent 0 | Agent 1 | Agent 2 | Agent 3 | Agent 4 (reference) |
-| --- | --- | --- | --- | --- | --- |
+
+| time   | Agent 0  | Agent 1  | Agent 2  | Agent 3  | Agent 4 (reference)                                                                                                                       |
+| ------ | -------- | -------- | -------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | t0-t50 | (silent) | (silent) | (silent) | (silent) | `. I'm like, "What was I doing?". I was like, "I was like, "I was like, "I was like, "I was like, "I was like, "I was like, "I was like,` |
+
 
 For comparison, the human continuation for this exact window has **three**
 agents actually taking turns (agent0: "Okay, we were trying to deduce... I'm
@@ -2418,29 +2448,32 @@ collapse most other arms show this early).
 
 **Paired continuation metrics confirm severe collapse, not real turn-taking**:
 
-| Metric | Human reference | Model generation |
-| --- | ---: | ---: |
-| `columns.exactly_one_rate` (exactly one active speaker) | 0.777 | 0.053 |
-| `boundary_handoff.overlap_columns_before_resolution` | 0 | 71 |
-| `speaking_runs.summary.max` (longest continuous run) | 16 | 79 |
-| `boundary_handoff.clean` | 1.0 (clean) | 0.0 (not clean) |
-| `total_active_tokens` | 87 | 343 |
+
+| Metric                                                  | Human reference | Model generation |
+| ------------------------------------------------------- | --------------- | ---------------- |
+| `columns.exactly_one_rate` (exactly one active speaker) | 0.777           | 0.053            |
+| `boundary_handoff.overlap_columns_before_resolution`    | 0               | 71               |
+| `speaking_runs.summary.max` (longest continuous run)    | 16              | 79               |
+| `boundary_handoff.clean`                                | 1.0 (clean)     | 0.0 (not clean)  |
+| `total_active_tokens`                                   | 87              | 343              |
+
 
 **Decoded text confirms the exact failure mode this predicts -- all 4 agents
 loop the identical rotating phrase simultaneously**:
 
-| Agent | Generated continuation (94 columns) |
-| --- | --- |
-| 0 | `"Okay. And I'm the user interface designer. Okay. And I'm the user experience designer. Okay. And I'm the marketing expert. Okay. And I'm the project manager."` (cycle repeats ~2.5x) |
-| 1 | *identical text to Agent 0, near-verbatim, same cycle* |
-| 2 | *identical text to Agent 0, near-verbatim, same cycle* |
-| 3 | `"... project manager. Okay. And you are the user interface designer. Okay. Okay. And I'm the marketing expert. ..."` (same rotating template, slightly different phase) |
+
+| Agent | Generated continuation (94 columns)                                                                                                                                                     |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0     | `"Okay. And I'm the user interface designer. Okay. And I'm the user experience designer. Okay. And I'm the marketing expert. Okay. And I'm the project manager."` (cycle repeats ~2.5x) |
+| 1     | *identical text to Agent 0, near-verbatim, same cycle*                                                                                                                                  |
+| 2     | *identical text to Agent 0, near-verbatim, same cycle*                                                                                                                                  |
+| 3     | `"... project manager. Okay. And you are the user interface designer. Okay. Okay. And I'm the marketing expert. ..."` (same rotating template, slightly different phase)                |
+
 
 For comparison, the human reference for this exact window has each of the
 4 agents genuinely introducing themselves in turn with distinct content
 (`"Uh, Dave Cochrane. User Interface Defin Designer, yes."` /
-`"You're the Marketing Expert, okay. Next we have? T_R_I_K. And your role
-in this is? Industrial Designer..."` / etc.) -- real, non-overlapping,
+`"You're the Marketing Expert, okay. Next we have? T_R_I_K. And your role in this is? Industrial Designer..."` / etc.) -- real, non-overlapping,
 content-distinct turn-taking.
 
 **Interpretation**: this is simultaneously a cross-agent near-echo
@@ -2462,8 +2495,7 @@ here in the opposite direction: increasing handoff probability without an
 anti-overlap constraint also produces takeover chaos, just via babble
 instead of via silence.
 
-**Practical conclusion for the final-run recipe decision**: `same_handoff_
-cross_entropy` (`lambda_same_handoff`) is NOT ready to include in the final
+**Practical conclusion for the final-run recipe decision**: `same_handoff_ cross_entropy` (`lambda_same_handoff`) is NOT ready to include in the final
 run recipe based on this evidence -- one decoded example at step280 is not
 enough to declare it permanently broken (it may still resolve with more
 training, an added anti-overlap term, or a lower `lambda_same_handoff`
@@ -2561,6 +2593,8 @@ checkpoint; result pending. Net effect so far: DE2's exact recipe
 produces wildly different fates across seeds (silent collapse vs.
 strengthening engagement), reinforcing that no single-seed result in this
 family should be trusted without a broad-verified, multi-seed check.
+
+
 
 ## Final candidate106 step1500 + sampled decoding: first development result near several human continuation statistics (08-14)
 
@@ -2683,31 +2717,35 @@ format (em dash means inactive/silent):
 
 ### MELD example (`meld-06cc1c0cb3a6ca3f`)
 
-| Generated columns | Agent 0 | Agent 1 |
-|---|---|---|
-| 0–2 | “’s ugh” | “Damn it.” |
-| 3–12 | “I knew I shouldn’t have told her.” | — |
-| 14–23 | — | “Okay well… We’ll stop by tomorrow then?” |
-| 24–29 | “I’ll see you then.” | “I’ll see you at…” |
-| 30–31 | — | “4.” |
-| 34–36 | “Bye.” | — |
-| 39–45 | — | “Like I can’t believe this.” |
-| 48–94 | “Hello hello, Jill, it’s me Jill. Whoa whoa whoa, he won’t go out with you. I know, I know, just talk to him. Please, he’s just such a sweetie.” | — |
+
+| Generated columns | Agent 0                                                                                                                                          | Agent 1                                   |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
+| 0–2               | “’s ugh”                                                                                                                                         | “Damn it.”                                |
+| 3–12              | “I knew I shouldn’t have told her.”                                                                                                              | —                                         |
+| 14–23             | —                                                                                                                                                | “Okay well… We’ll stop by tomorrow then?” |
+| 24–29             | “I’ll see you then.”                                                                                                                             | “I’ll see you at…”                        |
+| 30–31             | —                                                                                                                                                | “4.”                                      |
+| 34–36             | “Bye.”                                                                                                                                           | —                                         |
+| 39–45             | —                                                                                                                                                | “Like I can’t believe this.”              |
+| 48–94             | “Hello hello, Jill, it’s me Jill. Whoa whoa whoa, he won’t go out with you. I know, I know, just talk to him. Please, he’s just such a sweetie.” | —                                         |
+
 
 This example has mostly clean alternating ownership and coherent
 conversation-like content, although columns 24–29 include a brief overlap.
 
 ### AMI example (`ES2003a`)
 
-| Generated columns | Agent 0 | Agent 1 | Agent 2 | Agent 3 |
-|---|---|---|---|---|
-| 0–3 | — | — | — | “Troublemaker.” |
-| 16–19 | “Good to know.” | — | — | — |
-| 29–43 | “Right. E_S_P_E_,_E_R_. Okay.” | — | — | — |
-| 53–54 | “Right.” | — | — | — |
-| 64–65 | “Right.” | — | — | — |
-| 76–77 | “Right.” | — | — | — |
-| 87–93 | “Good to know. Michael Andrew Br…” | — | — | — |
+
+| Generated columns | Agent 0                            | Agent 1 | Agent 2 | Agent 3         |
+| ----------------- | ---------------------------------- | ------- | ------- | --------------- |
+| 0–3               | —                                  | —       | —       | “Troublemaker.” |
+| 16–19             | “Good to know.”                    | —       | —       | —               |
+| 29–43             | “Right. E_S_P_E_,*E_R*. Okay.”     | —       | —       | —               |
+| 53–54             | “Right.”                           | —       | —       | —               |
+| 64–65             | “Right.”                           | —       | —       | —               |
+| 76–77             | “Right.”                           | —       | —       | —               |
+| 87–93             | “Good to know. Michael Andrew Br…” | —       | —       | —               |
+
 
 This one is non-looping by the aggregate detector but qualitatively weaker:
 fragmentary spelling and repeated short acknowledgements remain. It is
@@ -2715,12 +2753,14 @@ included specifically to avoid presenting only the best-looking output.
 
 ### Werewolf example (`Game1`)
 
-| Generated columns | Agent 0 | Agent 1 | Agent 2 | Agent 3 | Agent 4 |
-|---|---|---|---|---|---|
-| 0–2 | “thehone.” | — | — | — | — |
-| 21–24 | “He’s not.” | — | — | — | — |
-| 36–45 | “I don’t know. It flashes every time.” | — | — | — | — |
-| 53–57 | — | — | — | “God dammit. One” | — |
+
+| Generated columns | Agent 0                                | Agent 1 | Agent 2 | Agent 3           | Agent 4 |
+| ----------------- | -------------------------------------- | ------- | ------- | ----------------- | ------- |
+| 0–2               | “thehone.”                             | —       | —       | —                 | —       |
+| 21–24             | “He’s not.”                            | —       | —       | —                 | —       |
+| 36–45             | “I don’t know. It flashes every time.” | —       | —       | —                 | —       |
+| 53–57             | —                                      | —       | —       | “God dammit. One” | —       |
+
 
 This example realizes a clean late handoff without overlap, but its content
 is fragmented. The cross-source inspection therefore supports a narrower
@@ -2743,9 +2783,11 @@ fragmented sampled speech and severe greedy cross-agent duplication.
 Representative greedy matrix (`s4027`, AMI; both active agents emit the same
 loop for the entire continuation):
 
-| Generated columns | Agent 0 | Agent 1 | Agent 2 | Agent 3 |
-|---|---|---|---|---|
-| 0–95 | — | “Thank you.” repeated 32 times | — | “Thank you.” repeated 32 times |
+
+| Generated columns | Agent 0 | Agent 1                        | Agent 2 | Agent 3                        |
+| ----------------- | ------- | ------------------------------ | ------- | ------------------------------ |
+| 0–95              | —       | “Thank you.” repeated 32 times | —       | “Thank you.” repeated 32 times |
+
 
 This independently confirms the earlier H100 target-only negative: sampling
 can conceal repetition metrics without creating actual conversational
@@ -2777,9 +2819,11 @@ monologue.
 
 Representative greedy MELD matrix (`meld-06cc1c0cb3a6ca3f`):
 
-| Generated columns | Agent 0 | Agent 1 |
-|---|---|---|
-| 0–40 | “I’m gonna have to tell you this now. I’m sorry.” then “I’m sorry.” repeated | “I’m sorry.” repeated |
+
+| Generated columns | Agent 0                                                                      | Agent 1               |
+| ----------------- | ---------------------------------------------------------------------------- | --------------------- |
+| 0–40              | “I’m gonna have to tell you this now. I’m sorry.” then “I’m sorry.” repeated | “I’m sorry.” repeated |
+
 
 This is another verified small-suite false positive, not a new leader. Do
 not promote seed7106 to full-development or final-test. Seed2106 remains
@@ -3073,4 +3117,3 @@ seed2106’s **0.201**: 92106 0.101, 93106 0.099, 94106 **0.272**, 95106
 (MELD 0.300 / AMI **0.000**). Decoded AMI is “Project Manager.Okay,
 okay”; 97106 AMI is just “Project Manager,.” Wave27 99106 cluster
 **0.104**, AMI **0.000**. Do not promote. `final_test` stays sealed.
-

@@ -231,6 +231,31 @@ def test_fill_from_queue_respects_already_running_usage(tmp_path, monkeypatch):
     assert still_queued["status"] == job_queue.STATUS_QUEUED
 
 
+def test_fill_from_queue_does_not_backfill_while_foreign_job_is_accommodated(
+    tmp_path, monkeypatch
+):
+    daemon = _daemon(tmp_path, live=True)
+    daemon.state["vacated"] = {"foreign-1": {"partition": "dgxh100"}}
+    entries = []
+    entry = job_queue.add_job(
+        entries, "a", "x.sbatch", {}, gpu_count=1, partition="dgxh100",
+        priority=1, notes="",
+    )
+    job_queue.save_queue(entries, daemon.queue_path)
+    called = []
+    monkeypatch.setattr(
+        "scripts.ops.gpu_yield_daemon.subprocess.run",
+        lambda *args, **kwargs: called.append(args) or _FakeSbatchResult(),
+    )
+
+    daemon.fill_from_queue({"dgxh100": [], "dgx": []})
+
+    assert called == []
+    assert job_queue.find_entry(job_queue.load_queue(daemon.queue_path), entry["id"])[
+        "status"
+    ] == job_queue.STATUS_QUEUED
+
+
 def test_fill_from_queue_dry_run_does_not_mutate(tmp_path, monkeypatch):
     daemon = _daemon(tmp_path, live=False)
     entries = []

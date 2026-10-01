@@ -1,0 +1,14 @@
+{
+  "stage_steps": 1500,
+  "development_contract": "/home/ad.msoe.edu/garrido-lestacheh/UR/MatrixChat/logs/final_runs_20260814/contracts/development_screening.json",
+  "output_root": "/home/ad.msoe.edu/garrido-lestacheh/UR/MatrixChat/logs/final_runs_20260815_wave13_c106",
+  "runs": [
+    {
+      "run_name": "final13_h100_c106_s35106",
+      "gpu": "h100",
+      "source_config": "hyperparameters/h100p3_cand_00106.json",
+      "seed": 35106,
+      "processed_data_dir": "/home/ad.msoe.edu/garrido-lestacheh/matrixchat/processed_final_20260814_lookback192_allspk"
+    }
+  ]
+}

@@ -106,6 +106,10 @@ class MatrixQwenConfig:
     lambda_content: float = 1.0
     lambda_activity: float = 1.0
     lambda_reward: float = 0.05
+    # Penalize assigning high probability to a recent token from the same
+    # speaker row, except when that token is the human target itself.
+    lambda_repetition_penalty: float = 0.0
+    repetition_window: int = 16
     # Proper-scoring identity-transition objective. It only compares SAME
     # versus HANDOFF on clean unique-owner -> unique-owner human transitions,
     # masking silence/overlap entirely. Zero preserves historical behavior.
@@ -174,6 +178,7 @@ class MatrixCausalLMOutput:
     turn_reward_stats: Optional[dict] = None
     same_handoff_loss: Optional[torch.Tensor] = None
     same_handoff_stats: Optional[dict] = None
+    repetition_loss: Optional[torch.Tensor] = None
 
 
 class MatrixQwenForCausalLM(nn.Module):
@@ -316,6 +321,69 @@ class MatrixQwenForCausalLM(nn.Module):
         else:
             raise ValueError(f"Unknown position_mode: {mode!r} (expected 'flat' or 'column')")
         return pos.unsqueeze(0).expand(batch_size, seq)
+
+    @staticmethod
+    def recent_token_repetition_loss(
+        logits: torch.Tensor,
+        input_ids: torch.Tensor,
+        labels: torch.Tensor,
+        activity_mask: torch.Tensor,
+        window: int,
+    ) -> torch.Tensor:
+        """Unlikelihood loss for non-target recent same-row token reuse.
+
+        This is deliberately narrower than a blanket token-frequency penalty:
+        the human target token is excluded, so legitimate repetitions present
+        in the source transcript retain ordinary content supervision.
+        """
+        if window <= 0:
+            return logits.new_zeros(())
+        b, a, t, v = logits.shape
+        if t == 0:
+            return logits.new_zeros(())
+        offsets = torch.arange(window, device=logits.device)
+        positions = torch.arange(t, device=logits.device).unsqueeze(1) - offsets
+        in_range = positions >= 0
+        positions = positions.clamp(min=0)
+        gather_positions = positions.view(1, 1, t, window).expand(b, a, t, window)
+        recent_ids = input_ids.unsqueeze(-1).expand(-1, -1, -1, window).gather(
+            2, gather_positions
+        )
+        recent_active = activity_mask.bool().unsqueeze(-1).expand(
+            -1, -1, -1, window
+        ).gather(2, gather_positions)
+        valid = (
+            in_range.view(1, 1, t, window)
+            & recent_active
+            & (labels.unsqueeze(-1) != -100)
+            & (recent_ids != labels.unsqueeze(-1))
+        )
+        # Keep this auxiliary probability calculation in float32. In bfloat16
+        # a nominal clamp such as 1 - 1e-6 rounds back to exactly 1, making
+        # -log1p(-p) infinite and poisoning the whole training loss.
+        safe_logits = torch.nan_to_num(
+            logits.float(), nan=0.0, posinf=50.0, neginf=-50.0
+        )
+        flat_logits = safe_logits.reshape(b * a * t, v)
+        flat_ids = recent_ids.reshape(b * a * t, window)
+        selected_logits = flat_logits.gather(1, flat_ids).reshape(b, a, t, window)
+        log_normalizer = safe_logits.logsumexp(dim=-1, keepdim=True)
+        log_probs = selected_logits - log_normalizer
+        log_probs = torch.nan_to_num(
+            log_probs, nan=float("-inf"), posinf=0.0, neginf=float("-inf")
+        ).masked_fill(~valid, float("-inf"))
+        max_log_prob = log_probs.max(dim=-1).values
+        valid_position = valid.any(dim=-1)
+        if not valid_position.any():
+            return logits.new_zeros(())
+        probability = max_log_prob.clamp(max=0.0).exp().clamp(max=1.0 - 1e-6)
+        return torch.nan_to_num(
+            (-torch.log1p(-probability))[valid_position].mean(),
+            nan=0.0,
+            posinf=20.0,
+            neginf=0.0,
+        )
+
 
     def _default_agent_ids(self, batch_size: int, num_agents: int, seq_len: int, device) -> torch.Tensor:
         """Agent ids ``[B, A, T]`` where row ``a`` holds the constant value ``a``."""
@@ -474,6 +542,7 @@ class MatrixQwenForCausalLM(nn.Module):
         activity_logits = self.unflatten_scalar(flat_activity_logits, num_agents=a, seq_len=t)  # [B, A, T]
 
         content_loss = None
+        repetition_loss = None
         if labels is not None:
             # Custom CE over matrix-aligned labels (NOT the base model's shifted loss).
             # Only ever placed on cells where the next column speaks (see data/convert.py).
@@ -492,6 +561,17 @@ class MatrixQwenForCausalLM(nn.Module):
                 # this batch, not a corrupted one (a NaN would otherwise poison
                 # any running average, e.g. across a validation set).
                 content_loss = flat_logits.new_zeros(())
+            if (
+                self.matrix_config.lambda_repetition_penalty > 0
+                and input_activity_mask is not None
+            ):
+                repetition_loss = self.recent_token_repetition_loss(
+                    logits,
+                    input_ids,
+                    labels,
+                    input_activity_mask,
+                    self.matrix_config.repetition_window,
+                )
 
         activity_loss = None
         turn_reward_mean = None
@@ -575,6 +655,8 @@ class MatrixQwenForCausalLM(nn.Module):
             loss = flat_logits.new_zeros(())
             if content_loss is not None:
                 loss = loss + self.matrix_config.lambda_content * content_loss
+            if repetition_loss is not None:
+                loss = loss + self.matrix_config.lambda_repetition_penalty * repetition_loss
             if activity_loss is not None:
                 loss = loss + self.matrix_config.lambda_activity * activity_loss
             if turn_reward_mean is not None:
@@ -595,6 +677,7 @@ class MatrixQwenForCausalLM(nn.Module):
             turn_reward_stats=turn_reward_stats,
             same_handoff_loss=same_handoff_loss,
             same_handoff_stats=same_handoff_stats,
+            repetition_loss=repetition_loss,
         )
 
     # ------------------------------------------------------------------

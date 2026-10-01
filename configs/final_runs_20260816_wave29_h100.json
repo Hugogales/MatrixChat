@@ -1,0 +1,49 @@
+{
+  "stage_steps": 1500,
+  "development_contract": "/home/ad.msoe.edu/garrido-lestacheh/UR/MatrixChat/logs/final_runs_20260814/contracts/development_screening.json",
+  "output_root": "/home/ad.msoe.edu/garrido-lestacheh/UR/MatrixChat/logs/final_runs_20260816_wave29_c106",
+  "runs": [
+    {
+      "run_name": "final29_h100_c106_s111106",
+      "gpu": "h100",
+      "source_config": "hyperparameters/h100p3_cand_00106.json",
+      "seed": 111106,
+      "processed_data_dir": "/home/ad.msoe.edu/garrido-lestacheh/matrixchat/processed_final_20260814_lookback192_allspk"
+    },
+    {
+      "run_name": "final29_h100_c106_s112106",
+      "gpu": "h100",
+      "source_config": "hyperparameters/h100p3_cand_00106.json",
+      "seed": 112106,
+      "processed_data_dir": "/home/ad.msoe.edu/garrido-lestacheh/matrixchat/processed_final_20260814_lookback192_allspk"
+    },
+    {
+      "run_name": "final29_h100_c106_s113106",
+      "gpu": "h100",
+      "source_config": "hyperparameters/h100p3_cand_00106.json",
+      "seed": 113106,
+      "processed_data_dir": "/home/ad.msoe.edu/garrido-lestacheh/matrixchat/processed_final_20260814_lookback192_allspk"
+    },
+    {
+      "run_name": "final29_h100_c106_s114106",
+      "gpu": "h100",
+      "source_config": "hyperparameters/h100p3_cand_00106.json",
+      "seed": 114106,
+      "processed_data_dir": "/home/ad.msoe.edu/garrido-lestacheh/matrixchat/processed_final_20260814_lookback192_allspk"
+    },
+    {
+      "run_name": "final29_h100_c106_s115106",
+      "gpu": "h100",
+      "source_config": "hyperparameters/h100p3_cand_00106.json",
+      "seed": 115106,
+      "processed_data_dir": "/home/ad.msoe.edu/garrido-lestacheh/matrixchat/processed_final_20260814_lookback192_allspk"
+    },
+    {
+      "run_name": "final29_h100_c106_s116106",
+      "gpu": "h100",
+      "source_config": "hyperparameters/h100p3_cand_00106.json",
+      "seed": 116106,
+      "processed_data_dir": "/home/ad.msoe.edu/garrido-lestacheh/matrixchat/processed_final_20260814_lookback192_allspk"
+    }
+  ]
+}

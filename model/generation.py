@@ -142,11 +142,17 @@ def _decide_and_sample(
     temperature: float,
     activity_threshold: float,
     placeholder_token_id: int,
+    force_speaker: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Return ``(next_tokens[B, A], speak[B, A])`` for one step."""
     b, a, _ = content_logits.shape
     q = torch.sigmoid(activity_logits.float())
     speak = q > activity_threshold
+    if force_speaker is not None and force_speaker.any():
+        winners = q.argmax(dim=1)
+        forced = torch.zeros_like(speak)
+        forced.scatter_(1, winners.unsqueeze(1), True)
+        speak = torch.where(force_speaker.unsqueeze(1), forced, speak)
 
     if temperature and temperature > 0:
         probs = torch.softmax(content_logits.float() / temperature, dim=-1)
@@ -158,6 +164,34 @@ def _decide_and_sample(
     return next_tokens.long(), speak
 
 
+def _trailing_silence_columns(activity_mask: torch.Tensor) -> torch.Tensor:
+    """Count consecutive all-silent columns at each batch item's tail."""
+    silent = ~activity_mask.bool().any(dim=1)
+    count = torch.zeros(silent.shape[0], dtype=torch.long, device=silent.device)
+    for column in range(silent.shape[1] - 1, -1, -1):
+        active_counting = count == silent.shape[1] - 1 - column
+        count = torch.where(
+            active_counting & silent[:, column], count + 1, count
+        )
+    return count
+
+
+def _silence_rescue_controls(
+    silence_streak: torch.Tensor,
+    rescue_count: torch.Tensor,
+    finished: torch.Tensor,
+    *,
+    after_columns: int,
+    end_after_triggers: int,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Choose rescue/termination masks for a persistent conversation policy."""
+    trigger = (~finished) & (silence_streak >= after_columns)
+    next_count = rescue_count + trigger.long()
+    terminate = trigger & (next_count >= end_after_triggers)
+    force_speaker = trigger & ~terminate
+    return force_speaker, finished | terminate, next_count
+
+
 @torch.no_grad()
 def generate_matrix(
     model,
@@ -167,6 +201,8 @@ def generate_matrix(
     temperature: float = 0.0,
     activity_threshold: float = 0.5,
     placeholder_token_id: int = 0,
+    silence_rescue_after_columns: int = 5,
+    silence_rescue_end_after_triggers: int = 3,
     input_private_mask: Optional[torch.Tensor] = None,   # [B, A, T]; True = private cell
     agent_visibility: Optional[torch.Tensor] = None,      # [B, A, A]; constant for the conversation
     return_probs: bool = False,
@@ -223,9 +259,30 @@ def generate_matrix(
         generated_tokens = []
         generated_speak = []
         generated_probs = [] if return_probs else None
+        silence_streak = _trailing_silence_columns(cur_mask)
+        rescue_count = torch.zeros_like(silence_streak)
+        finished = torch.zeros_like(silence_streak, dtype=torch.bool)
         for _ in range(max_new_tokens):
+            force_speaker, finished, rescue_count = _silence_rescue_controls(
+                silence_streak,
+                rescue_count,
+                finished,
+                after_columns=silence_rescue_after_columns,
+                end_after_triggers=silence_rescue_end_after_triggers,
+            )
             nxt, speak = _decide_and_sample(
-                last_content, last_activity, temperature, activity_threshold, placeholder_token_id
+                last_content,
+                last_activity,
+                temperature,
+                activity_threshold,
+                placeholder_token_id,
+                force_speaker=force_speaker,
+            )
+            speak = torch.where(finished.unsqueeze(1), torch.zeros_like(speak), speak)
+            nxt = torch.where(
+                speak,
+                nxt,
+                torch.full_like(nxt, placeholder_token_id),
             )
             generated_tokens.append(nxt)
             generated_speak.append(speak)
@@ -237,6 +294,11 @@ def generate_matrix(
                 nxt.unsqueeze(-1),
                 speak.unsqueeze(-1),
                 column_private=torch.zeros_like(speak, dtype=torch.bool).unsqueeze(-1),
+            )
+            silence_streak = torch.where(
+                speak.any(dim=1),
+                torch.zeros_like(silence_streak),
+                silence_streak + 1,
             )
 
         if was_training:
@@ -260,6 +322,9 @@ def generate_matrix(
     generated_tokens = []
     generated_speak = []
     generated_probs = [] if return_probs else None
+    silence_streak = _trailing_silence_columns(cur_mask)
+    rescue_count = torch.zeros_like(silence_streak)
+    finished = torch.zeros_like(silence_streak, dtype=torch.bool)
     for _ in range(max_new_tokens):
         out = model(
             input_ids=cur, input_activity_mask=cur_mask,
@@ -268,8 +333,26 @@ def generate_matrix(
         last_content = out.logits[:, :, -1, :]          # [B, A, V]
         last_activity = out.activity_logits[:, :, -1]   # [B, A]
 
+        force_speaker, finished, rescue_count = _silence_rescue_controls(
+            silence_streak,
+            rescue_count,
+            finished,
+            after_columns=silence_rescue_after_columns,
+            end_after_triggers=silence_rescue_end_after_triggers,
+        )
         nxt, speak = _decide_and_sample(
-            last_content, last_activity, temperature, activity_threshold, placeholder_token_id
+            last_content,
+            last_activity,
+            temperature,
+            activity_threshold,
+            placeholder_token_id,
+            force_speaker=force_speaker,
+        )
+        speak = torch.where(finished.unsqueeze(1), torch.zeros_like(speak), speak)
+        nxt = torch.where(
+            speak,
+            nxt,
+            torch.full_like(nxt, placeholder_token_id),
         )
         generated_tokens.append(nxt)
         generated_speak.append(speak)
@@ -278,6 +361,11 @@ def generate_matrix(
 
         cur = torch.cat([cur, nxt.unsqueeze(-1)], dim=2)
         cur_mask = torch.cat([cur_mask, speak.unsqueeze(-1)], dim=2)
+        silence_streak = torch.where(
+            speak.any(dim=1),
+            torch.zeros_like(silence_streak),
+            silence_streak + 1,
+        )
         if cur_private is not None:
             cur_private = torch.cat(
                 [cur_private, torch.zeros_like(speak, dtype=torch.bool).unsqueeze(-1)], dim=2

@@ -109,28 +109,39 @@ def suggest_config(
     exactly, so switching ``optimizer`` from ``"random"`` to ``"tpe"`` changes
     *how* points are chosen, not *which* space is searched.
     """
-    base = trial.suggest_float("overlap_base_weight", 0.6, 2.0)
-    maximum = trial.suggest_float("overlap_max_weight", max(base + 0.8, 2.0), 6.0)
+    base_choices = _choices(search_space, "overlap_base_weight_choices", [])
+    base = trial.suggest_categorical("overlap_base_weight", base_choices) if base_choices else trial.suggest_float("overlap_base_weight", 0.6, 2.0)
+    max_choices = _choices(search_space, "overlap_max_weight_choices", [])
+    maximum = trial.suggest_categorical("overlap_max_weight", max_choices) if max_choices else trial.suggest_float("overlap_max_weight", max(base + 0.8, 2.0), 6.0)
     return {
         "context_lookback_columns": trial.suggest_categorical(
             "context_lookback_columns", [64, 128, 192]
         ),
-        "activity_pos_weight": round(
+        "activity_pos_weight": trial.suggest_categorical(
+            "activity_pos_weight",
+            _choices(search_space, "activity_pos_weight_choices", []),
+        ) if _choices(search_space, "activity_pos_weight_choices", []) else round(
             trial.suggest_float("activity_pos_weight", 0.70, 0.90), 3
         ),
         "overlap_base_weight": round(base, 3),
         "overlap_max_weight": round(maximum, 3),
-        "overlap_grace": trial.suggest_categorical("overlap_grace", [0, 1]),
-        "overlap_tau": trial.suggest_categorical("overlap_tau", [1, 2, 3, 5]),
-        "handoff_bonus_weight": round(
-            trial.suggest_float("handoff_bonus_weight", 0.25, 1.75), 3
-        ),
+        "overlap_grace": trial.suggest_categorical("overlap_grace", _choices(search_space, "overlap_grace_choices", [0, 1])),
+        "overlap_tau": trial.suggest_categorical("overlap_tau", _choices(search_space, "overlap_tau_choices", [1, 2, 3, 5])),
+        "handoff_bonus_weight": trial.suggest_categorical("handoff_bonus_weight", _choices(search_space, "handoff_bonus_weight_choices", [])) if _choices(search_space, "handoff_bonus_weight_choices", []) else round(trial.suggest_float("handoff_bonus_weight", 0.25, 1.75), 3),
         "lambda_activity": trial.suggest_categorical(
             "lambda_activity",
             _choices(search_space, "lambda_activity_choices", [0.5, 0.75, 1.0]),
         ),
         "lambda_reward": trial.suggest_categorical(
-            "lambda_reward", [0.05, 0.10, 0.20]
+            "lambda_reward", _choices(search_space, "lambda_reward_choices", [0.05, 0.10, 0.20])
+        ),
+        "lambda_repetition_penalty": trial.suggest_categorical(
+            "lambda_repetition_penalty",
+            _choices(search_space, "lambda_repetition_penalty_choices", [0.0]),
+        ),
+        "repetition_window": trial.suggest_categorical(
+            "repetition_window",
+            _choices(search_space, "repetition_window_choices", [16]),
         ),
         "gradient_accumulation_steps": trial.suggest_categorical(
             "gradient_accumulation_steps",
@@ -147,7 +158,7 @@ def suggest_config(
             "lora_r", _choices(search_space, "lora_r_choices", [16, 32, 64])
         ),
         "learning_rate": trial.suggest_categorical(
-            "learning_rate", LEARNING_RATE_CHOICES
+            "learning_rate", _choices(search_space, "learning_rate_choices", LEARNING_RATE_CHOICES)
         ),
         "dataset_weights": trial.suggest_categorical(
             "dataset_weights",
@@ -158,7 +169,7 @@ def suggest_config(
             ),
         ),
         "sampling_strategy": trial.suggest_categorical(
-            "sampling_strategy", ["probabilistic", "balanced_cycle"]
+            "sampling_strategy", _choices(search_space, "sampling_strategy_choices", ["probabilistic", "balanced_cycle"])
         ),
         "agent_attention_mode": trial.suggest_categorical(
             "agent_attention_mode",
@@ -284,6 +295,10 @@ def suggest_config(
                 DEFAULT_AGENT_DYNAMIC_STATE_MODE_CHOICES,
             ),
         ),
+        "agent_dynamic_state_dim": trial.suggest_categorical(
+            "agent_dynamic_state_dim",
+            _choices(search_space, "agent_dynamic_state_dim_choices", [64]),
+        ),
         "floor_control_adaptive_weight_alpha": trial.suggest_categorical(
             "floor_control_adaptive_weight_alpha",
             _choices(
@@ -291,6 +306,10 @@ def suggest_config(
                 "floor_control_adaptive_weight_alpha_choices",
                 DEFAULT_FLOOR_CONTROL_ADAPTIVE_WEIGHT_ALPHA_CHOICES,
             ),
+        ),
+        "floor_control_weight_overlap": trial.suggest_categorical(
+            "floor_control_weight_overlap",
+            _choices(search_space, "floor_control_weight_overlap_choices", [1.0]),
         ),
     }
 
@@ -300,23 +319,43 @@ def distributions_for(
 ) -> dict[str, BaseDistribution]:
     """Reconstruct the exact per-trial distributions used at sample time.
 
-    ``overlap_max_weight``'s lower bound depends on ``overlap_base_weight``,
-    so (unlike the other dimensions) its distribution must be rebuilt from
-    the specific historical candidate being backfilled, not a fixed constant.
+    When a search supplies explicit overlap-weight choices, both weights use
+    stable categorical distributions. Otherwise the legacy dynamic float
+    distributions are reconstructed from the historical base weight.
     """
     base = float(config["overlap_base_weight"])
     return {
         "context_lookback_columns": CategoricalDistribution([64, 128, 192]),
-        "activity_pos_weight": FloatDistribution(0.70, 0.90),
-        "overlap_base_weight": FloatDistribution(0.6, 2.0),
-        "overlap_max_weight": FloatDistribution(max(base + 0.8, 2.0), 6.0),
-        "overlap_grace": CategoricalDistribution([0, 1]),
-        "overlap_tau": CategoricalDistribution([1, 2, 3, 5]),
-        "handoff_bonus_weight": FloatDistribution(0.25, 1.75),
+        "activity_pos_weight": CategoricalDistribution(
+            _choices(search_space, "activity_pos_weight_choices", [])
+        ) if _choices(search_space, "activity_pos_weight_choices", []) else FloatDistribution(0.70, 0.90),
+        "overlap_base_weight": CategoricalDistribution(
+            _choices(search_space, "overlap_base_weight_choices", [])
+        ) if _choices(search_space, "overlap_base_weight_choices", []) else FloatDistribution(0.6, 2.0),
+        "overlap_max_weight": CategoricalDistribution(
+            _choices(search_space, "overlap_max_weight_choices", [])
+        ) if _choices(search_space, "overlap_max_weight_choices", []) else FloatDistribution(max(base + 0.8, 2.0), 6.0),
+        "overlap_grace": CategoricalDistribution(
+            _choices(search_space, "overlap_grace_choices", [0, 1])
+        ),
+        "overlap_tau": CategoricalDistribution(
+            _choices(search_space, "overlap_tau_choices", [1, 2, 3, 5])
+        ),
+        "handoff_bonus_weight": CategoricalDistribution(
+            _choices(search_space, "handoff_bonus_weight_choices", [])
+        ) if _choices(search_space, "handoff_bonus_weight_choices", []) else FloatDistribution(0.25, 1.75),
         "lambda_activity": CategoricalDistribution(
             _choices(search_space, "lambda_activity_choices", [0.5, 0.75, 1.0])
         ),
-        "lambda_reward": CategoricalDistribution([0.05, 0.10, 0.20]),
+        "lambda_reward": CategoricalDistribution(
+            _choices(search_space, "lambda_reward_choices", [0.05, 0.10, 0.20])
+        ),
+        "lambda_repetition_penalty": CategoricalDistribution(
+            _choices(search_space, "lambda_repetition_penalty_choices", [0.0])
+        ),
+        "repetition_window": CategoricalDistribution(
+            _choices(search_space, "repetition_window_choices", [16])
+        ),
         "gradient_accumulation_steps": CategoricalDistribution(
             _choices(search_space, "gradient_accumulation_choices", [1, 2, 4, 8])
         ),
@@ -329,7 +368,9 @@ def distributions_for(
         "lora_r": CategoricalDistribution(
             _choices(search_space, "lora_r_choices", [16, 32, 64])
         ),
-        "learning_rate": CategoricalDistribution(LEARNING_RATE_CHOICES),
+        "learning_rate": CategoricalDistribution(
+            _choices(search_space, "learning_rate_choices", LEARNING_RATE_CHOICES)
+        ),
         "dataset_weights": CategoricalDistribution(
             _choices(
                 search_space,
@@ -338,7 +379,10 @@ def distributions_for(
             )
         ),
         "sampling_strategy": CategoricalDistribution(
-            ["probabilistic", "balanced_cycle"]
+            _choices(
+                search_space, "sampling_strategy_choices",
+                ["probabilistic", "balanced_cycle"],
+            )
         ),
         "agent_attention_mode": CategoricalDistribution(
             _choices(
@@ -448,12 +492,18 @@ def distributions_for(
                 DEFAULT_AGENT_DYNAMIC_STATE_MODE_CHOICES,
             )
         ),
+        "agent_dynamic_state_dim": CategoricalDistribution(
+            _choices(search_space, "agent_dynamic_state_dim_choices", [64])
+        ),
         "floor_control_adaptive_weight_alpha": CategoricalDistribution(
             _choices(
                 search_space,
                 "floor_control_adaptive_weight_alpha_choices",
                 DEFAULT_FLOOR_CONTROL_ADAPTIVE_WEIGHT_ALPHA_CHOICES,
             )
+        ),
+        "floor_control_weight_overlap": CategoricalDistribution(
+            _choices(search_space, "floor_control_weight_overlap_choices", [1.0])
         ),
     }
 
@@ -487,6 +537,14 @@ def add_completed_trial(
 ) -> int:
     """Add one externally evaluated configuration to a fresh/current study."""
     distributions = distributions_for(config, search_space)
+    # Historical candidates can predate optional search dimensions. Optuna
+    # accepts partial parameter sets; omit absent dimensions rather than
+    # discarding otherwise-valid prior evidence.
+    distributions = {
+        key: distribution
+        for key, distribution in distributions.items()
+        if key in config
+    }
     params = {key: config[key] for key in distributions}
     trial = create_trial(
         state=TrialState.COMPLETE,

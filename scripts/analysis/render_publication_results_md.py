@@ -26,6 +26,26 @@ def _load(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _example_matrices(path: Path | None) -> str | None:
+    """Embed selected examples without adding a second document title."""
+    if path is None or not path.is_file():
+        return None
+    text = path.read_text(encoding="utf-8").strip()
+    if text.startswith("# Best conversations per dataset"):
+        text = text.removeprefix("# Best conversations per dataset").lstrip()
+    # The file is embedded below ``## Example conversations``. Nest its
+    # dataset/example headings so the resulting RESULTS.md outline is valid.
+    nested = []
+    for line in text.splitlines():
+        if line.startswith("### "):
+            nested.append("#" + line)
+        elif line.startswith("## "):
+            nested.append("#" + line)
+        else:
+            nested.append(line)
+    return "\n".join(nested).strip() or None
+
+
 def _fmt_p(value: float | None) -> str:
     if value is None:
         return "—"
@@ -100,6 +120,7 @@ def render(
     checkpoint_label: str,
     baseline_summary: dict | None,
     figures_dir: str,
+    example_matrices: str | None = None,
 ) -> str:
     n_records = stats.get("raw_record_count") or summary.get("raw_record_count")
     n_clusters = stats.get("independent_cluster_count") or summary.get("independent_cluster_count")
@@ -226,9 +247,24 @@ def render(
         [
             "## Example conversations",
             "",
-            "Highest-judge MatrixChat continuations with at least two clean handoffs are in "
-            "[`best_conversations/best_conversations.md`](best_conversations/best_conversations.md).",
+            "The selected continuations below use time-aligned speaker matrices: adjacent columns with "
+            "the same active-speaker set are compacted, and an em dash means silence. The standalone "
+            "[`best_conversations/best_conversations.md`](best_conversations/best_conversations.md) "
+            "contains the same examples.",
             "",
+        ]
+    )
+    if example_matrices:
+        lines.extend([example_matrices, ""])
+    else:
+        lines.extend(
+            [
+                "_No selected conversation matrices were available when this result bundle was rendered._",
+                "",
+            ]
+        )
+    lines.extend(
+        [
             "## What this does and does not show",
             "",
             "This bundle measures held-out continuation quality on AMI meetings + Werewolf games under "
@@ -252,6 +288,7 @@ def parse_args(argv=None):
     parser.add_argument("--baseline-summary", default=None)
     parser.add_argument("--baseline-stats", default=None)
     parser.add_argument("--baseline-label", default=None)
+    parser.add_argument("--best-conversations", default=None)
     return parser.parse_args(argv)
 
 
@@ -260,12 +297,16 @@ def main(argv=None) -> None:
     summary = _load(Path(args.summary))
     stats = _load(Path(args.stats))
     baseline = _load(Path(args.baseline_summary)) if args.baseline_summary else None
+    example_matrices = _example_matrices(
+        Path(args.best_conversations) if args.best_conversations else None
+    )
     text = render(
         summary,
         stats,
         checkpoint_label=args.checkpoint_label,
         baseline_summary=baseline,
         figures_dir=args.figures_dir,
+        example_matrices=example_matrices,
     )
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)

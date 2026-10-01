@@ -221,6 +221,8 @@ def build_model(args, device, torch_dtype):
         lambda_content=args.lambda_content,
         lambda_activity=args.lambda_activity,
         lambda_reward=args.lambda_reward,
+        lambda_repetition_penalty=args.lambda_repetition_penalty,
+        repetition_window=args.repetition_window,
         lambda_same_handoff=args.lambda_same_handoff,
         activity_pos_weight=args.activity_pos_weight,
         turn_reward_mode=args.turn_reward_mode,

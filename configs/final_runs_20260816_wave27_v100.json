@@ -1,0 +1,87 @@
+{
+  "stage_steps": 500,
+  "development_contract": "/home/ad.msoe.edu/garrido-lestacheh/UR/MatrixChat/logs/final_runs_20260814/contracts/development_screening.json",
+  "output_root": "/home/ad.msoe.edu/garrido-lestacheh/UR/MatrixChat/logs/final_runs_20260816_wave27_v100",
+  "runs": [
+    {
+      "run_name": "final27_v100_c106_s99106",
+      "gpu": "v100",
+      "source_config": "hyperparameters/h100p3_cand_00106.json",
+      "seed": 99106,
+      "processed_data_dir": "/home/ad.msoe.edu/garrido-lestacheh/matrixchat/processed_final_20260814_lookback192_allspk",
+      "overrides": {"batch_size": 1, "gradient_accumulation_steps": 32, "max_flat_len": 1536, "lora_r": 64, "lora_alpha": 128}
+    },
+    {
+      "run_name": "final27_v100_c106_s100106",
+      "gpu": "v100",
+      "source_config": "hyperparameters/h100p3_cand_00106.json",
+      "seed": 100106,
+      "processed_data_dir": "/home/ad.msoe.edu/garrido-lestacheh/matrixchat/processed_final_20260814_lookback192_allspk",
+      "overrides": {"batch_size": 1, "gradient_accumulation_steps": 32, "max_flat_len": 1536, "lora_r": 64, "lora_alpha": 128}
+    },
+    {
+      "run_name": "final27_v100_c106_s101106",
+      "gpu": "v100",
+      "source_config": "hyperparameters/h100p3_cand_00106.json",
+      "seed": 101106,
+      "processed_data_dir": "/home/ad.msoe.edu/garrido-lestacheh/matrixchat/processed_final_20260814_lookback192_allspk",
+      "overrides": {"batch_size": 1, "gradient_accumulation_steps": 32, "max_flat_len": 1536, "lora_r": 64, "lora_alpha": 128}
+    },
+    {
+      "run_name": "final27_v100_c106_s102106",
+      "gpu": "v100",
+      "source_config": "hyperparameters/h100p3_cand_00106.json",
+      "seed": 102106,
+      "processed_data_dir": "/home/ad.msoe.edu/garrido-lestacheh/matrixchat/processed_final_20260814_lookback192_allspk",
+      "overrides": {"batch_size": 1, "gradient_accumulation_steps": 32, "max_flat_len": 1536, "lora_r": 64, "lora_alpha": 128}
+    },
+    {
+      "run_name": "final27_v100_c106_s103106",
+      "gpu": "v100",
+      "source_config": "hyperparameters/h100p3_cand_00106.json",
+      "seed": 103106,
+      "processed_data_dir": "/home/ad.msoe.edu/garrido-lestacheh/matrixchat/processed_final_20260814_lookback192_allspk",
+      "overrides": {"batch_size": 1, "gradient_accumulation_steps": 32, "max_flat_len": 1536, "lora_r": 64, "lora_alpha": 128}
+    },
+    {
+      "run_name": "final27_v100_c106_s104106",
+      "gpu": "v100",
+      "source_config": "hyperparameters/h100p3_cand_00106.json",
+      "seed": 104106,
+      "processed_data_dir": "/home/ad.msoe.edu/garrido-lestacheh/matrixchat/processed_final_20260814_lookback192_allspk",
+      "overrides": {"batch_size": 1, "gradient_accumulation_steps": 32, "max_flat_len": 1536, "lora_r": 64, "lora_alpha": 128}
+    },
+    {
+      "run_name": "final27_v100_c106_s105106",
+      "gpu": "v100",
+      "source_config": "hyperparameters/h100p3_cand_00106.json",
+      "seed": 105106,
+      "processed_data_dir": "/home/ad.msoe.edu/garrido-lestacheh/matrixchat/processed_final_20260814_lookback192_allspk",
+      "overrides": {"batch_size": 1, "gradient_accumulation_steps": 32, "max_flat_len": 1536, "lora_r": 64, "lora_alpha": 128}
+    },
+    {
+      "run_name": "final27_v100_c106_s106106",
+      "gpu": "v100",
+      "source_config": "hyperparameters/h100p3_cand_00106.json",
+      "seed": 106106,
+      "processed_data_dir": "/home/ad.msoe.edu/garrido-lestacheh/matrixchat/processed_final_20260814_lookback192_allspk",
+      "overrides": {"batch_size": 1, "gradient_accumulation_steps": 32, "max_flat_len": 1536, "lora_r": 64, "lora_alpha": 128}
+    },
+    {
+      "run_name": "final27_v100_c106_s107106",
+      "gpu": "v100",
+      "source_config": "hyperparameters/h100p3_cand_00106.json",
+      "seed": 107106,
+      "processed_data_dir": "/home/ad.msoe.edu/garrido-lestacheh/matrixchat/processed_final_20260814_lookback192_allspk",
+      "overrides": {"batch_size": 1, "gradient_accumulation_steps": 32, "max_flat_len": 1536, "lora_r": 64, "lora_alpha": 128}
+    },
+    {
+      "run_name": "final27_v100_c106_s108106",
+      "gpu": "v100",
+      "source_config": "hyperparameters/h100p3_cand_00106.json",
+      "seed": 108106,
+      "processed_data_dir": "/home/ad.msoe.edu/garrido-lestacheh/matrixchat/processed_final_20260814_lookback192_allspk",
+      "overrides": {"batch_size": 1, "gradient_accumulation_steps": 32, "max_flat_len": 1536, "lora_r": 64, "lora_alpha": 128}
+    }
+  ]
+}

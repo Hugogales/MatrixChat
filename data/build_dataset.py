@@ -82,6 +82,30 @@ def parse_args(argv=None):
         help="Content labels: preserve target-seat-only supervision (default), or "
              "supervise every speaking row for content-bearing sources.",
     )
+    p.add_argument(
+        "--clean_timed_overlaps",
+        type=str2bool,
+        default=False,
+        help="Serialize only long AMI/Werewolf overlaps as complete utterances.",
+    )
+    p.add_argument(
+        "--ami_overlap_keep_tokens",
+        type=int,
+        default=2,
+        help="Keep AMI overlaps containing at most this many later-turn tokens.",
+    )
+    p.add_argument(
+        "--werewolf_overlap_keep_tokens",
+        type=int,
+        default=3,
+        help="Keep Werewolf overlaps containing at most this many later-turn tokens.",
+    )
+    p.add_argument(
+        "--clean_inter_turn_gap_seconds",
+        type=float,
+        default=0.05,
+        help="Gap inserted when serializing a long overlap.",
+    )
     p.add_argument("--permute_agents", type=str2bool, default=True)
     p.add_argument("--num_proc", type=int, default=8)
     p.add_argument("--limit", type=int, default=0,
@@ -190,6 +214,10 @@ def convert(args):
         max_flat_len=args.max_flat_len,
         context_lookback_columns=args.context_lookback_columns,
         content_supervision_mode=args.content_supervision_mode,
+        clean_timed_overlaps=args.clean_timed_overlaps,
+        ami_overlap_keep_tokens=args.ami_overlap_keep_tokens,
+        werewolf_overlap_keep_tokens=args.werewolf_overlap_keep_tokens,
+        clean_inter_turn_gap_seconds=args.clean_inter_turn_gap_seconds,
     )
 
     from datasets import Dataset
@@ -250,6 +278,10 @@ def convert(args):
             conversion_config={
                 "content_supervision_mode": args.content_supervision_mode,
                 "context_lookback_columns": args.context_lookback_columns,
+                "clean_timed_overlaps": args.clean_timed_overlaps,
+                "ami_overlap_keep_tokens": args.ami_overlap_keep_tokens,
+                "werewolf_overlap_keep_tokens": args.werewolf_overlap_keep_tokens,
+                "clean_inter_turn_gap_seconds": args.clean_inter_turn_gap_seconds,
             },
         )
         print(f"[convert] {name}: {len(ds)} examples -> {out_dir}")

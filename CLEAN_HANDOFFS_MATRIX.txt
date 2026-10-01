@@ -1,0 +1,90 @@
+MatrixChat -- All Confirmed Clean Handoffs So Far (Training Race)
+====================================================================
+Format: rows = time steps, columns = agents. "." = inactive (silent) cell.
+
+Both examples below come from race_20260720_P_kitchen_sink's checkpoint
+(and, for Example 1's exact pattern, also independently reproduced on
+race_20260720_Z_pos_weight_70_plus_overlap -- same recipe family:
+activity_pos_weight~0.7 + steep silence/speaker decay + handoff_bonus=0.5).
+
+Scoring note: "clean handoff" = the first speaker (Agent 0) finishes
+speaking BEFORE the listener starts, and no column ever has more than
+one agent active at once (zero overlap).
+
+
+--------------------------------------------------------------------
+EXAMPLE 1 -- greedy decoding (temperature=0.0), 2 agents
+--------------------------------------------------------------------
+Prompt (Agent 0): "honestly i thought we played really well so what
+                    do you all think"
+Exact per-step data (verified by direct regeneration against the
+checkpoint, scripts/turn_taking_probe.py).
+
+step | Agent 0   | Agent 1
+-----|-----------|----------
+  0  | ?         | .
+  1  | .         | .
+  2  | .         | .
+  3  | .         | I
+  4  | .         | think
+  5  | .         | we
+  6  | .         | did
+  7  | .         | great
+  8  | .         | .
+  9  | .         | I
+ 10  | .         | think
+ 11  | .         | we
+
+Decoded: Agent 0: "?"  |  Agent 1: "I think we did great. I think we"
+Gap: Agent 0's last spoken step = 0. Agent 1 starts at step 3 (a
+2-step pause, then a real, on-topic response). Zero overlap.
+
+
+--------------------------------------------------------------------
+EXAMPLE 2 -- stochastic decoding (temperature=0.8, seed=0), 2 agents
+--------------------------------------------------------------------
+Prompt (Agent 0): "i will stop there and let someone else take it
+                    from here"
+Approximate per-step columns (reconstructed from decoded text word
+counts; exact step boundaries were not saved for this run, and this
+exact seed/prompt combination did NOT reproduce identically on a
+later rerun -- stochastic sampling is not bit-reproducible across
+different GPU hardware even with the same seed. Treat the column
+alignment below as illustrative, not exact.)
+
+step | Agent 0   | Agent 1
+-----|-----------|----------
+  0  | How       | .
+  1  | about      | .
+  2  | you       | .
+  3  | Rachel    | .
+  4  | ,         | .
+  5  | like      | .
+  6  | that      | .
+  7  | ?         | .
+  8  | .         | .
+  9  | .         | .
+ 10  | .         | Oh
+ 11  | .         | ,
+ 12  | .         | I
+ 13  | .         | was
+
+Decoded: Agent 0: "How about you Rachel, like that?"
+         Agent 1: "Oh, I was just"
+
+
+--------------------------------------------------------------------
+CONTEXT -- how rare is this?
+--------------------------------------------------------------------
+A broad stochastic sweep (72 trials: 6 prompts x 4 agent-counts x 3
+seeds, scripts/demo_handoff_variation.py) against this SAME checkpoint
+found:
+  clean_handoff_rate:          1.4%  (1/72)
+  no_listener_response_rate:  94.4%
+
+So these two examples are real, but they are NOT representative of
+typical behavior -- the model produces a clean handoff only rarely
+and unpredictably; it has not reliably learned this skill.
+
+Full run history: TRAINING_RUN_LOG.md
+Race sweep: logs/sweeps/race_20260718_204451/

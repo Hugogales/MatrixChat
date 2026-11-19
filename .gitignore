@@ -18,6 +18,8 @@ logs/*.out
 logs/*.err
 logs/slurm/*.out
 logs/slurm/*.err
+# Werewolf game transcripts (scripts/eval/werewolf_game.py --output)
+logs/werewolf_games/
 checkpoints/run_*/
 checkpoints/**/*.pt
 

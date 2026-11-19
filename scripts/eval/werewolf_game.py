@@ -60,6 +60,17 @@ Usage:
     python scripts/eval/werewolf_game.py --checkpoint_dir checkpoints/checkpoint \
         --hyperparameters hyperparameters/adaptcleanv3_cand_00003.json \
         --game_seed 7 --output logs/werewolf_games/game_7.json
+
+    # Slurm run example
+    sbatch --partition=teaching --gpus=1 --cpus-per-task=4 --time=02:00:00 \
+        --job-name=werewolf_game \
+        --output=logs/slurm/%x_%j.out --error=logs/slurm/%x_%j.err \
+        --wrap="python scripts/eval/werewolf_game.py \
+            --checkpoint_dir checkpoints/checkpoint \
+            --hyperparameters hyperparameters/adaptcleanv3_cand_00003.json \
+            --game_seed 1105 \
+            --output logs/werewolf_games/checkpoint_1105_free.json"
+
 """
 
 from __future__ import annotations

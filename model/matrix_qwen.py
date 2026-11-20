@@ -444,30 +444,24 @@ class MatrixQwenForCausalLM(nn.Module):
     # ------------------------------------------------------------------
     # Forward
     # ------------------------------------------------------------------
-    def forward(
+    def _prepare_matrix_inputs(
         self,
-        input_ids: torch.LongTensor,                        # [B, A, T]
-        labels: Optional[torch.LongTensor] = None,           # [B, A, T], -100 ignored, content targets
-        agent_ids: Optional[torch.LongTensor] = None,        # [B, A, T]
-        channel_ids: Optional[torch.LongTensor] = None,      # [B, A, T]
-        input_activity_mask: Optional[torch.Tensor] = None,  # [B, A, T] bool/long; None = all active
-        activity_labels: Optional[torch.LongTensor] = None,  # [B, A, T] in {0,1,-100}; speak-next label
-        input_private_mask: Optional[torch.Tensor] = None,   # [B, A, T] bool; True = private cell
-        agent_visibility: Optional[torch.Tensor] = None,     # [B, A, A] bool; [owner, viewer]
-        attention_mask: Optional[torch.Tensor] = None,
-        return_dict: bool = True,
-    ) -> MatrixCausalLMOutput:
-        if input_ids.dim() != 3:
-            raise ValueError(f"input_ids must be [B, A, T], got shape {tuple(input_ids.shape)}")
+        input_ids: torch.LongTensor,
+        agent_ids: Optional[torch.LongTensor],
+        channel_ids: Optional[torch.LongTensor],
+        input_activity_mask: Optional[torch.Tensor],
+        input_private_mask: Optional[torch.Tensor],
+        agent_visibility: Optional[torch.Tensor],
+        attention_mask: Optional[torch.Tensor],
+    ):
+        """Flatten a ``[B, A, T]`` matrix into the base model's inputs.
 
+        Shared by :meth:`forward` and :meth:`forward_selected` so the two can
+        never disagree. Returns ``(inputs_embeds, position_ids, attention_mask,
+        flat_input_ids)``.
+        """
         b, a, t = input_ids.shape
         device = input_ids.device
-
-        if a > self.matrix_config.max_agents:
-            raise ValueError(
-                f"num_agents ({a}) exceeds max_agents ({self.matrix_config.max_agents})"
-            )
-
         if agent_ids is None:
             agent_ids = self._default_agent_ids(b, a, t, device)
 
@@ -518,6 +512,86 @@ class MatrixQwenForCausalLM(nn.Module):
                 private_mask=flat_private_mask,
                 agent_visibility=agent_visibility,
             )
+        return inputs_embeds, position_ids, attention_mask, flat_input_ids
+
+    def forward_selected(
+        self,
+        input_ids: torch.LongTensor,                        # [B, A, T]
+        logit_positions: torch.LongTensor,                   # [K] flat (t * A + a) positions
+        input_activity_mask: Optional[torch.Tensor] = None,
+        input_private_mask: Optional[torch.Tensor] = None,
+        agent_visibility: Optional[torch.Tensor] = None,
+        hidden_layers: tuple[int, ...] = (),
+        hidden_positions: Optional[torch.LongTensor] = None,  # [U] flat positions
+    ) -> dict[str, Any]:
+        """Teacher-forced pass that computes vocab logits only where needed.
+
+        The full ``[B, A, T, V]`` logits of a long game do not fit in memory, so
+        the vocab head runs only at ``logit_positions`` (``logits_to_keep``).
+        Returns ``logits`` ``[B, K, V]``, ``activity_logits`` ``[B, A, T]`` and,
+        when ``hidden_layers`` is given, ``hidden`` ``[B, U, len(hidden_layers),
+        H]`` gathered at ``hidden_positions`` (used by the RL critic).
+        """
+        if input_ids.dim() != 3:
+            raise ValueError(f"input_ids must be [B, A, T], got shape {tuple(input_ids.shape)}")
+        _, a, t = input_ids.shape
+        inputs_embeds, position_ids, attention_mask, _ = self._prepare_matrix_inputs(
+            input_ids, None, None, input_activity_mask, input_private_mask, agent_visibility, None,
+        )
+        outputs = self.base_model(
+            inputs_embeds=inputs_embeds,
+            position_ids=position_ids,
+            attention_mask=attention_mask,
+            use_cache=False,
+            output_hidden_states=True,
+            return_dict=True,
+            logits_to_keep=logit_positions,
+        )
+        flat_hidden = outputs.hidden_states[-1]
+        flat_activity_logits = self.activity_head(
+            flat_hidden.to(self.activity_head.weight.dtype)
+        ).squeeze(-1)
+        result = {
+            "logits": outputs.logits,
+            "activity_logits": self.unflatten_scalar(flat_activity_logits, num_agents=a, seq_len=t),
+        }
+        if hidden_layers:
+            if hidden_positions is None:
+                raise ValueError("hidden_positions is required with hidden_layers")
+            result["hidden"] = torch.stack(
+                [outputs.hidden_states[layer][:, hidden_positions, :] for layer in hidden_layers],
+                dim=2,
+            )
+        return result
+
+    def forward(
+        self,
+        input_ids: torch.LongTensor,                        # [B, A, T]
+        labels: Optional[torch.LongTensor] = None,           # [B, A, T], -100 ignored, content targets
+        agent_ids: Optional[torch.LongTensor] = None,        # [B, A, T]
+        channel_ids: Optional[torch.LongTensor] = None,      # [B, A, T]
+        input_activity_mask: Optional[torch.Tensor] = None,  # [B, A, T] bool/long; None = all active
+        activity_labels: Optional[torch.LongTensor] = None,  # [B, A, T] in {0,1,-100}; speak-next label
+        input_private_mask: Optional[torch.Tensor] = None,   # [B, A, T] bool; True = private cell
+        agent_visibility: Optional[torch.Tensor] = None,     # [B, A, A] bool; [owner, viewer]
+        attention_mask: Optional[torch.Tensor] = None,
+        return_dict: bool = True,
+    ) -> MatrixCausalLMOutput:
+        if input_ids.dim() != 3:
+            raise ValueError(f"input_ids must be [B, A, T], got shape {tuple(input_ids.shape)}")
+
+        b, a, t = input_ids.shape
+        device = input_ids.device
+
+        if a > self.matrix_config.max_agents:
+            raise ValueError(
+                f"num_agents ({a}) exceeds max_agents ({self.matrix_config.max_agents})"
+            )
+
+        inputs_embeds, position_ids, attention_mask, flat_input_ids = self._prepare_matrix_inputs(
+            input_ids, agent_ids, channel_ids, input_activity_mask, input_private_mask,
+            agent_visibility, attention_mask,
+        )
         outputs = self.base_model(
             inputs_embeds=inputs_embeds,
             position_ids=position_ids,

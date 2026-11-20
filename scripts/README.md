@@ -20,6 +20,12 @@ All scripts are grouped by purpose. Run every command from the repo root
   environment-overridable. Set `INIT_FROM` + `INIT_CHECKPOINT_PREFER` for a
   fresh warm start, or `RESUME_FROM` for an exact continuation when the full
   training state is available; never set both.
+- `train_werewolf_rl.py` (+ `.sbatch`) -- Stage-B Werewolf RL (PPO) in one
+  job: the same GPUs play games and then train on them.
+- `werewolf_continuous/` -- the always-on Werewolf RL loop: self-renewing
+  H100 + V100 jobs split between playing games and training, plus borrowed
+  idle GPUs. Start / stop / status scripts; see
+  `scripts/training/werewolf_continuous/README.md`.
 
 ## `search/` -- persistent rotating HPO
 

@@ -134,17 +134,37 @@ def test_teacher_forced_logprobs_match_rollout(tiny_policy, over):
         assert turns[t["turn"]]["agent"] == t["agent"]
 
 
-def test_game_rules_parity_ties_and_no_skip(tiny_policy):
+@pytest.mark.parametrize("rule", ["all_dead", "parity"])
+def test_game_rules_win_conditions_ties_and_no_skip(tiny_policy, rule):
+    """all_dead (default): play on until every Villager is dead or the Werewolf is out, so with
+    4 players a game can reach a 1-vs-1 vote (always a tie, drawn by lot). parity: stop at parity."""
     tok = WordTokenizer(512)
-    _, result = play(tiny_policy, tok, seed=11, num_players=5, max_days=0)
-    assert result["winner"] in ("Village", "Werewolves")
-    for day in result["events"]["days"]:
-        assert len(day["votes"]) == len(day["alive"])        # everyone votes
-        assert all(t is not None for _, t in day["votes"])   # nobody skips
-        assert day["voted_out"] is not None                  # a tie still eliminates someone
-    alive = [i for i, n in enumerate(result["names"]) if n in result["alive_at_end"]]
-    wolves = sum(result["roles"][s] == "Werewolf" for s in alive)
-    assert wolves == 0 or wolves >= len(alive) - wolves
+    for seed in (11, 12, 13, 14):
+        _, result = play(tiny_policy, tok, seed=seed, num_players=4, max_days=0, werewolves_win=rule)
+        assert result["winner"] in ("Village", "Werewolves") and result["werewolves_win"] == rule
+        for day in result["events"]["days"]:
+            assert len(day["votes"]) == len(day["alive"])        # everyone votes
+            assert all(t is not None for _, t in day["votes"])   # nobody skips
+            assert day["voted_out"] is not None                  # a tie still eliminates someone
+            if len(day["alive"]) == 2:                           # 1 vs 1: each names the other
+                assert day["tie"]
+        alive = [i for i, n in enumerate(result["names"]) if n in result["alive_at_end"]]
+        wolves = sum(result["roles"][s] == "Werewolf" for s in alive)
+        others = len(alive) - wolves
+        if rule == "all_dead":
+            assert wolves == 0 or others == 0
+            assert result["days_played"] <= 2
+        else:
+            assert wolves == 0 or wolves >= others
+            assert result["days_played"] == 1
+
+
+def test_check_winner_rules():
+    roles = ["Werewolf", "Villager", "Villager", "Villager"]
+    assert game_mod.check_winner([0, 1], roles) is None                     # default all_dead: play on
+    assert game_mod.check_winner([0, 1], roles, "parity") == "Werewolves"
+    assert game_mod.check_winner([0], roles) == "Werewolves"
+    assert game_mod.check_winner([1, 2], roles, "parity") == "Village"
 
 
 def test_losses_backpropagate_to_policy_and_critic(tiny_policy):

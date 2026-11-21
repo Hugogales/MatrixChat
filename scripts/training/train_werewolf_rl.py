@@ -73,7 +73,7 @@ def parse_args(argv=None):
     p.add_argument("--steps", type=int, default=2)
     p.add_argument("--games_per_rank", type=int, default=1)
     p.add_argument("--seed", type=int, default=0, help="Game seeds are seed + a global game counter.")
-    p.add_argument("--save_every", type=int, default=1, help="Save a checkpoint every N steps (and at the end).")
+    p.add_argument("--save_every", type=int, default=1, help="Save a checkpoint every N steps (and at the end; 0 = only at the end).")
     p.add_argument("--keep_last", type=int, default=0,
                    help="Keep only the newest N step_* checkpoints (0 = keep all).")
     p.add_argument("--save_games", choices=["all", "first", "none"], default="first",
@@ -338,7 +338,7 @@ def main(argv=None):
                     continue
                 with open(os.path.join(game_dir, f"step{step + 1:05d}_rank{rank}_game{i}.json"), "w") as f:
                     json.dump({k: v for k, v in r.items() if k != "rollout"}, f, indent=2)
-        if is_main and ((step + 1) % args.save_every == 0 or step + 1 == args.steps):
+        if is_main and ((args.save_every > 0 and (step + 1) % args.save_every == 0) or step + 1 == args.steps):
             save_checkpoint(os.path.join(args.output_dir, f"step_{step + 1:05d}"), model, critic, ema, optimizer,
                             scaler, saved.get("matrix_config", {}), base_keys, step + 1, args,
                             keep_last=args.keep_last)

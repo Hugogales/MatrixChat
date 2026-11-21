@@ -64,9 +64,12 @@ GATEWAYS = {
     "tmobile": "tmomail.net",
 }
 SMS_CHARS = 160
-NTFY_PRIORITY = {"stopped": "urgent", "gave_up": "high", "crash": "high", "start": "default", "test": "default"}
+NTFY_PRIORITY = {"stopped": "urgent", "gave_up": "high", "crash": "high", "start": "default", "test": "default",
+                 "status": "default", "report": "default", "gpu": "default"}
 NTFY_TAGS = {"stopped": "rotating_light", "gave_up": "warning", "crash": "warning", "start": "rocket",
+             "status": "information_source", "report": "bar_chart", "gpu": "inbox_tray",
              "test": "white_check_mark"}
+NTFY_MAX_CHARS = 3900  # ntfy turns messages over 4096 bytes into attachments
 DEFAULT_OUTBOX = os.path.expanduser("~/.config/werewolf_rl/outbox")
 CRON_MARKER = "# werewolf_rl notify relay"
 DEFAULT_EVENTS = "start,crash,gave_up,stopped"
@@ -168,7 +171,8 @@ def send_text(message, cfg=None, event=None):
         return False, "alerts not configured (no NTFY_TOPIC / NOTIFY_PHONE)"
     phone = cfg.get("NOTIFY_PHONE", "").strip()
     primary = provider_of(cfg)
-    ok, detail = _send_with(primary, message[:480], cfg, phone, event)
+    # ntfy takes ~4 KB per message (the hourly GPU report needs it); SMS-style providers stay short.
+    ok, detail = _send_with(primary, message[:NTFY_MAX_CHARS if primary == "ntfy" else 480], cfg, phone, event)
     fallback = cfg.get("NOTIFY_FALLBACK", "").strip().lower()
     if not ok and fallback and fallback != primary and (fallback == "ntfy" or phone):
         ok2, detail2 = _send_with(fallback, message[:300], cfg, phone, event)
@@ -185,8 +189,11 @@ def _send_with(provider, message, cfg, phone, event=None):
             if not topic:
                 return False, "ntfy needs NTFY_TOPIC"
             server = cfg.get("NTFY_SERVER", "").strip().rstrip("/") or "https://ntfy.sh"
+            # NTFY_PRIORITY_<EVENT> in notify.env overrides a priority (e.g. NTFY_PRIORITY_REPORT=low: silent).
+            priority = (cfg.get(f"NTFY_PRIORITY_{(event or '').upper()}", "").strip()
+                        or NTFY_PRIORITY.get(event, "default"))
             headers = {"Title": cfg.get("NTFY_TITLE", "Werewolf RL"),
-                       "Priority": NTFY_PRIORITY.get(event, "default"),
+                       "Priority": priority,
                        "Tags": NTFY_TAGS.get(event, "robot")}
             if cfg.get("NTFY_TOKEN"):
                 headers["Authorization"] = f"Bearer {cfg['NTFY_TOKEN']}"
@@ -330,17 +337,19 @@ def install_cron(repo, remove=False):
     return lines
 
 
-def notify(event, message, run_dir=None, cfg=None):
-    """Text an alert for ``event`` (start / crash / gave_up / stopped) if it is enabled.
+def notify(event, message, run_dir=None, cfg=None, force=False):
+    """Text an alert for ``event`` (start / crash / gave_up / stopped / status) if it is enabled.
 
     With ``run_dir``, every attempt is logged to ``RUN/chain/notify.log`` and an
     identical alert sent within ``NOTIFY_REPEAT_MINUTES`` (default 30) is skipped.
+    ``force`` sends it even if ``NOTIFY_EVENTS`` leaves the event out (for the
+    announcements stop.sh / start.sh make when someone runs them).
     """
     cfg = load_config() if cfg is None else cfg
     if not enabled(cfg):
         return False
     events = {e.strip() for e in cfg.get("NOTIFY_EVENTS", DEFAULT_EVENTS).split(",") if e.strip()}
-    if event not in events:
+    if event not in events and not force:
         return False
     log_path = os.path.join(run_dir, "chain", "notify.log") if run_dir else None
     repeat = float(cfg.get("NOTIFY_REPEAT_MINUTES", "30")) * 60
@@ -376,6 +385,7 @@ def main(argv=None):
     s = sub.add_parser("send", help="Send an alert (used by the job scripts).")
     s.add_argument("--event", required=True)
     s.add_argument("--run_dir", default=None)
+    s.add_argument("--force", action="store_true", help="send even if NOTIFY_EVENTS leaves the event out")
     s.add_argument("message")
     a = p.parse_args(argv)
     repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -406,7 +416,7 @@ def main(argv=None):
             ok, detail = send_text(message, cfg, event="test")
             print(("Sent: " if ok else "FAILED: ") + detail)
         sys.exit(0 if ok else 1)
-    notify(a.event, a.message, a.run_dir)
+    notify(a.event, a.message, a.run_dir, force=a.force)
 
 
 if __name__ == "__main__":

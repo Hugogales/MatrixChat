@@ -15,13 +15,15 @@ the queue every ``--poll`` seconds: as soon as another user's job, or one of
 our own main-chain jobs, is waiting for GPUs on this partition, the current
 game is abandoned and the process exits so the GPU is freed.
 
-A ``RUN/STOP`` file makes it exit after the current game.
+A ``RUN/STOP`` file makes it exit after the current game; ``RUN/PAUSE``
+(``stop.sh --pause``) makes it abandon the current game and exit at once.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import re
 import signal
 import sys
 import threading
@@ -61,6 +63,19 @@ def parse_args(argv=None):
     p.add_argument("--device", default="cuda")
     add_game_args(p)
     return p.parse_args(argv)
+
+
+def track_phase(progress, msg):
+    """Follow play_game's log lines to keep ``progress["phase"]`` current ("day 2", "day 2 vote", "night 2")."""
+    m = re.match(r"\s*--- (day|night) (\d+)", msg)
+    if m:
+        progress["phase"] = f"{m.group(1)} {m.group(2)}"
+    elif msg.startswith("[discussion:"):
+        progress["phase"] = f"{progress.get('phase', 'day ?')} vote"
+
+
+def gpu_mem_gb():
+    return round(torch.cuda.max_memory_reserved() / 1e9, 1) if torch.cuda.is_available() else None
 
 
 def gpu_kind():
@@ -114,15 +129,19 @@ def main(argv=None):
     def abort_check():
         if yield_reason["why"]:
             raise GameAborted(yield_reason["why"])
+        if cont.pause_requested(run):  # paused for an update: don't finish a game under the old code
+            raise GameAborted("PAUSE file")
 
     def release_reason():
-        if cont.stop_requested(run):
-            return "STOP file"
-        return yield_reason["why"]
+        return cont.halt_reason(run) or yield_reason["why"]
 
     from training.werewolf_rl.distributed import Heartbeat
 
-    heartbeat = Heartbeat(run, f"player_{label}", {"role": args.role, "kind": kind, "job": job})
+    # Live progress for status.sh and the hourly report (heartbeat every 20 s).
+    progress = {"state": "ready", "games": 0, "loaded": loaded, "phase": None, "game_t0": None,
+                "last": None, "avg_minutes": None}
+    heartbeat = Heartbeat(run, f"player_{label}", {"role": args.role, "kind": kind, "job": job, "slot": args.slot},
+                          extra=lambda: dict(progress, gpu_mem_gb=gpu_mem_gb()))
 
     def on_term(signum, _frame):  # Slurm time limit / scancel: stop advertising at once
         log(f"got signal {signum}; leaving")
@@ -132,15 +151,17 @@ def main(argv=None):
     signal.signal(signal.SIGTERM, on_term)
     try:
         return _play_loop(args, run, model, tokenizer, name_pool, kind, label, loaded, device,
-                          abort_check, release_reason, log)
+                          abort_check, release_reason, log, progress)
     finally:
         heartbeat.stop()
 
 
 def _play_loop(args, run, model, tokenizer, name_pool, kind, label, loaded, device, abort_check,
-               release_reason, log):
+               release_reason, log, progress=None):
+    progress = {} if progress is None else progress
     failures = 0
     games = 0
+    minutes = []
     log(f"ready: role={args.role} partition={args.partition or '-'}")
     while True:
         reason = release_reason()
@@ -149,27 +170,34 @@ def _play_loop(args, run, model, tokenizer, name_pool, kind, label, loaded, devi
             return 0
         version = cont.latest_version(run)
         if version > loaded:
+            progress.update(state=f"loading policy v{version}", phase=None, game_t0=None)
             try:
                 cont.load_weights(run, model, version)
                 loaded = version
+                progress["loaded"] = loaded
                 log(f"loaded policy v{version}")
             except (FileNotFoundError, EOFError, RuntimeError) as exc:  # being replaced right now; retry
                 log(f"could not load v{version} yet ({exc}); retrying")
                 time.sleep(10)
                 continue
         if cont.fresh_count(run, loaded - args.max_lag) >= args.max_pool:
+            progress.update(state="pool full, waiting for a training step", phase=None, game_t0=None)
             time.sleep(30)
             continue
         avg = cont.average_time(run, f"game_{kind}")
         if not cont.fits(cont.remaining_seconds(), avg, args.time_margin):
+            progress.update(state="holding: another game would not fit before the time limit", phase=None,
+                            game_t0=None)
             reason = cont.idle_until_killed(release_reason, poll=min(args.poll, 60), log=log)
             log(f"exiting: {reason}")
             return 0
         seed = int.from_bytes(os.urandom(6), "little")
         t0 = time.time()
+        progress.update(state="playing", phase="day 1", game_t0=t0)
         try:
             with torch.no_grad():
-                result = play_game(model, tokenizer, args, seed, record=True, log=lambda *a: None,
+                result = play_game(model, tokenizer, args, seed, record=True,
+                                   log=lambda msg="", *_: track_phase(progress, str(msg)),
                                    name_pool=name_pool, abort_check=abort_check)
         except GameAborted as exc:
             log(f"abandoned the current game and exiting to free the GPU: {exc}")
@@ -186,7 +214,14 @@ def _play_loop(args, run, model, tokenizer, name_pool, kind, label, loaded, devi
         failures = 0
         games += 1
         cont.write_game(run, result, loaded, label, seed, seconds)
-        cont.record_time(run, f"game_{kind}", seconds, columns=result["matrix_columns"])
+        cont.record_time(run, f"game_{kind}", seconds, columns=result["matrix_columns"], winner=result["winner"],
+                         days=result["days_played"], version=loaded, gpu=label,
+                         rule=result.get("werewolves_win"))
+        minutes = (minutes + [seconds / 60])[-20:]
+        progress.update(state="between games", phase=None, game_t0=None, games=games,
+                        last={"winner": result["winner"], "days": result["days_played"],
+                              "minutes": round(seconds / 60, 1)},
+                        avg_minutes=round(sum(minutes) / len(minutes), 1))
         log(f"game {games}: v{loaded} seed={seed} {seconds:.0f}s winner={result['winner']} "
             f"days={result['days_played']} columns={result['matrix_columns']}")
         if device.type == "cuda":

@@ -39,5 +39,6 @@
   "vote_prompt": "Alright, time to vote. Say who you think the Werewolf is and why. Whoever gets the most votes is out.",
   "vote_result": "{out} got the most votes, so {out} is out of the game.",
   "vote_temperature": 1.0,
-  "vote_tie": "It's a tie between {tied}, so we drew lots: {out} is out of the game."
+  "vote_tie": "It's a tie between {tied}, so we drew lots: {out} is out of the game.",
+  "werewolves_win": "all_dead"
 }

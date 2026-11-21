@@ -11,8 +11,9 @@ the RL trainer (``scripts/training/train_werewolf_rl.py``), so what this script
 plays is exactly what training plays.
 
 Game loop: Day 1 -> Night 1 -> Day 2 -> ... until a side wins (or ``--max_days``
-if set). Village wins when every Werewolf is dead; Werewolves win at parity
-(as many living Werewolves as living non-Werewolves). Role cards are first
+if set). Village wins when every Werewolf is dead; Werewolves win when every
+other player is dead (``--werewolves_win parity``: as soon as there are as many
+living Werewolves as living non-Werewolves). Role cards are first
 person ("I am X. I am a Villager.") unless ``--plain_cards``. Dead players
 never speak, vote, or appear as candidates again. Each day is opened by a
 different living player; from Day 2 on the opener first names who was killed.

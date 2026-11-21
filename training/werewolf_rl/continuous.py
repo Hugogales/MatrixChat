@@ -6,6 +6,9 @@ filesystem, so no process has to stay attached to a terminal:
     RUN/
       game_config.json        game rules + sampling, read by players AND the learner
       STOP                    touch to stop: no new jobs/games/steps are started
+      PAUSE                   stop.sh --pause: players abandon their game, trainers finish
+                              the current step, then every job keeps its GPUs idle (and its
+                              queued follow-ups) until start.sh removes it
       weights/LATEST          newest published policy version (int)
       weights/policy_vNNNNNN.pt   trainable parameters of that version
       pool/incoming/*.pt      finished games waiting to be trained on
@@ -41,6 +44,7 @@ def run_paths(run_dir):
     return {
         "config": os.path.join(run_dir, "game_config.json"),
         "stop": os.path.join(run_dir, "STOP"),
+        "pause": os.path.join(run_dir, "PAUSE"),
         "weights": os.path.join(run_dir, "weights"),
         "incoming": os.path.join(run_dir, "pool", "incoming"),
         "claimed": os.path.join(run_dir, "pool", "claimed"),
@@ -59,6 +63,22 @@ def ensure_run_dir(run_dir):
 
 def stop_requested(run_dir):
     return os.path.exists(run_paths(run_dir)["stop"])
+
+def pause_requested(run_dir):
+    return os.path.exists(run_paths(run_dir)["pause"])
+
+def halt_reason(run_dir):
+    """Why trainers and players should leave now: ``"STOP file"``, ``"PAUSE file"`` or ``None``.
+
+    STOP ends the run (jobs wind down, queued jobs are cancelled); PAUSE only
+    stops the processes: chain.sh keeps the GPUs and restarts them when start.sh
+    removes it.
+    """
+    if stop_requested(run_dir):
+        return "STOP file"
+    if pause_requested(run_dir):
+        return "PAUSE file"
+    return None
 
 def atomic_write_json(path, obj):
     tmp = f"{path}.tmp{os.getpid()}"
@@ -275,9 +295,23 @@ def remaining_seconds(job_id=None):
         return None
     return parse_slurm_duration(_run(["squeue", "-h", "-j", str(job_id), "-o", "%L"]).strip())
 
+def job_info(job_id):
+    """``(state, elapsed_seconds)`` of a job from sacct (``("", None)`` if unknown)."""
+    lines = _run(["sacct", "-n", "-X", "-P", "-j", str(job_id), "-o", "State,ElapsedRaw"]).splitlines()
+    if not lines:
+        return "", None
+    state, _, elapsed = lines[0].partition("|")
+    state = state.split()[0] if state.strip() else ""
+    try:
+        return state, int(elapsed)
+    except ValueError:
+        return state, None
+
 def job_state(job_id):
-    out = _run(["sacct", "-n", "-X", "-j", str(job_id), "-o", "State%30"]).split()
-    return out[0] if out else ""
+    return job_info(job_id)[0]
+
+def job_elapsed(job_id):
+    return job_info(job_id)[1]
 
 def me():
     return os.environ.get("USER") or _run(["whoami"]).strip()
@@ -302,8 +336,10 @@ def waiting_jobs(partition, own_names=()):
             waiting.append({"job": job, "user": owner, "name": name, "reason": reason})
     return waiting
 
-def idle_gpus(partition):
-    """Free GPUs per usable node of ``partition``: ``{node: count}``."""
+_BAD_NODE_STATES = ("DRAIN", "DOWN", "RESERVED", "MAINT", "FAIL", "NOT_RESPONDING")
+
+def node_resources(partition):
+    """Free resources per usable node of ``partition``: ``{node: {"gpus", "cpus", "mem_mb"}}``."""
     nodes = set(_run(["sinfo", "-h", "-p", partition, "-N", "-o", "%N"]).split())
     free = {}
     for line in _run(["scontrol", "show", "node", "-o"]).splitlines():
@@ -311,8 +347,7 @@ def idle_gpus(partition):
         node = fields.get("NodeName")
         if node not in nodes:
             continue
-        state = fields.get("State", "")
-        if any(bad in state for bad in ("DRAIN", "DOWN", "RESERVED", "MAINT", "FAIL", "NOT_RESPONDING")):
+        if any(bad in fields.get("State", "") for bad in _BAD_NODE_STATES):
             continue
         total = sum(int(m.group(1)) for m in re.finditer(r"gpu(?::[\w-]+)?:(\d+)", fields.get("Gres", "")))
         used = sum(int(m.group(1)) for m in re.finditer(r"gres/gpu(?::[\w-]+)?=(\d+)", fields.get("AllocTRES", "")))
@@ -320,9 +355,20 @@ def idle_gpus(partition):
         typed = [int(m.group(1)) for m in re.finditer(r"gres/gpu:[\w-]+=(\d+)", fields.get("AllocTRES", ""))]
         if typed:
             used -= sum(typed)
-        if total - used > 0:
-            free[node] = total - used
+
+        def num(key):
+            try:
+                return int(fields.get(key, "0"))
+            except ValueError:
+                return 0
+
+        free[node] = {"gpus": max(total - used, 0), "cpus": max(num("CPUTot") - num("CPUAlloc"), 0),
+                      "mem_mb": max(num("RealMemory") - num("AllocMem"), 0)}
     return free
+
+def idle_gpus(partition):
+    """Free GPUs per usable node of ``partition``: ``{node: count}``."""
+    return {node: r["gpus"] for node, r in node_resources(partition).items() if r["gpus"] > 0}
 
 def my_jobs(name_prefix):
     """Our jobs whose name starts with ``name_prefix``: list of ``{job, name, state, partition}``."""
@@ -372,19 +418,35 @@ def _sbatch(argv):
 # ----------------------------------------------------------------------------
 # Job chain guard
 # ----------------------------------------------------------------------------
-def chain_guard(run_dir, role, prev_job, max_crashes=3, state_of=job_state, alert=None):
-    """Decide whether a newly started chain job should run; returns ``(ok, message)``.
+MIN_RUN_SECONDS = 600  # a chain job that "completes" sooner than this counts as a crash
 
-    Stops when STOP exists, or when the chain's previous job crashed for the
-    ``max_crashes``-th time in a row. A job that ended normally (completed,
-    reached its time limit, or was cancelled) resets the crash count. Crashes
-    and a stopped chain are texted via ``notify`` (``alert`` overrides it).
+def chain_check(run_dir, role, prev_job, max_crashes=3, state_of=job_state, alert=None,
+                elapsed_of=None, min_run=MIN_RUN_SECONDS, hold=False):
+    """Decide what a newly started chain job does; returns ``(action, message)``.
+
+    ``action`` is ``"run"``, ``"stop"`` (exit and cancel the chain's queued
+    jobs) or ``"hold"`` (keep the GPUs, idle; only with ``hold=True``).
+
+    STOP present -> ``"stop"``. Otherwise the previous job's end is counted: a
+    job that ended normally (reached its time limit, was cancelled, or
+    completed after at least ``min_run`` seconds -- ``elapsed_of(job)`` tells
+    how long it ran) resets the crash count; a crash, or a completion sooner
+    than ``min_run``, adds one, so a broken setup cannot burn through the
+    queued follow-up jobs. At ``max_crashes`` in a row:
+
+    * ``hold=False`` (gap chains): the chain stops and stays stopped (its
+      queued follow-ups do not revive it) until start.sh removes RUN/chain/<role>.json.
+    * ``hold=True`` (the main chains): this job keeps its GPUs idle instead, and
+      the follow-ups stay queued, so nobody else gets the GPUs. The holding job
+      ends at its time limit, which resets the count: the next job tries again.
+
+    Crashes, a stop and the start of a hold are sent via ``notify`` (``alert`` overrides it).
     """
     if alert is None:
         from .notify import notify as alert
     paths = ensure_run_dir(run_dir)
     if stop_requested(run_dir):
-        return False, "STOP file present"
+        return "stop", "STOP file present"
     path = os.path.join(paths["chain"], f"{role}.json")
     try:
         with open(path) as f:
@@ -392,24 +454,43 @@ def chain_guard(run_dir, role, prev_job, max_crashes=3, state_of=job_state, aler
     except (FileNotFoundError, ValueError):
         status = {"consecutive_crashes": 0, "history": []}
     run_name = os.path.basename(os.path.normpath(run_dir))
+    if status.get("stopped"):
+        return "stop", f"chain stopped earlier ({status.get('reason', '')}); start.sh resets it"
     if prev_job:
-        state = state_of(prev_job)
+        state = state_of(prev_job) or ""
         crashed = any(state.startswith(s) for s in CRASH_STATES)
-        status["consecutive_crashes"] = status["consecutive_crashes"] + 1 if crashed else 0
+        elapsed = elapsed_of(prev_job) if elapsed_of is not None else None
+        if not crashed and state.startswith("COMPLETED") and elapsed is not None and elapsed < min_run:
+            crashed, state = True, f"{state} after only {elapsed}s"
+        status["consecutive_crashes"] = status.get("consecutive_crashes", 0) + 1 if crashed else 0
         if crashed and status["consecutive_crashes"] < max_crashes:
             alert("crash", f"Werewolf RL {run_name}: {role} job {prev_job} crashed ({state}), "
                            f"{status['consecutive_crashes']} in a row. The next job is taking over.", run_dir)
         status["history"] = (status.get("history", []) + [{"job": prev_job, "state": state, "t": time.time()}])[-50:]
-    stopped = status["consecutive_crashes"] >= max_crashes
-    status["stopped"] = stopped
-    status["reason"] = f"{status['consecutive_crashes']} consecutive crashes" if stopped else ""
+    limit = status.get("consecutive_crashes", 0) >= max_crashes
+    status["stopped"] = limit and not hold
+    status["holding"] = limit and hold
+    status["reason"] = f"{status['consecutive_crashes']} consecutive crashes" if limit else ""
     atomic_write_json(path, status)
-    if stopped:
+    if limit and hold:
+        alert("stopped", f"Werewolf RL {run_name}: the {role} chain crashed {status['consecutive_crashes']} times "
+                         f"in a row (last: job {prev_job}). Its next job keeps the GPUs but leaves them idle until "
+                         f"its time limit, then tries again. Fix it and run start.sh {run_name} to retry at once.",
+              run_dir)
+        return "hold", f"previous {status['consecutive_crashes']} jobs crashed (see {path}); holding the GPUs idle"
+    if limit:
         alert("stopped", f"Werewolf RL {run_name}: the {role} chain STOPPED after {max_crashes} crashes in a "
                          f"row (last: job {prev_job}). Check status.sh {run_name}, fix, then start.sh {run_name}.",
               run_dir)
-        return False, f"previous {max_crashes} jobs crashed (see {path}); chain stopped"
-    return True, f"ok (consecutive crashes: {status['consecutive_crashes']})"
+        return "stop", f"previous {max_crashes} jobs crashed (see {path}); chain stopped"
+    return "run", f"ok (consecutive crashes: {status.get('consecutive_crashes', 0)})"
+
+
+def chain_guard(run_dir, role, prev_job, max_crashes=3, state_of=job_state, alert=None,
+                elapsed_of=None, min_run=MIN_RUN_SECONDS):
+    """``chain_check`` without holding: ``(ok, message)``, ok = the job should run."""
+    action, msg = chain_check(run_dir, role, prev_job, max_crashes, state_of, alert, elapsed_of, min_run)
+    return action == "run", msg
 
 def idle_until_killed(should_release=None, poll=60, log=print):
     """Hold the allocation until Slurm's time limit ends the job.
@@ -471,6 +552,8 @@ def main(argv=None):
     g.add_argument("--role", required=True)
     g.add_argument("--prev_job", default="")
     g.add_argument("--max_crashes", type=int, default=3)
+    g.add_argument("--hold", action="store_true",
+                   help="at max_crashes keep the GPUs idle (exit 4) instead of stopping the chain (exit 3)")
     w = sub.add_parser("write-config", help="Write RUN/game_config.json from game flags.")
     w.add_argument("--run_dir", required=True)
     e = sub.add_parser("extra-role", help="Print 'train' or 'play' for this borrowed GPU.")
@@ -480,9 +563,10 @@ def main(argv=None):
         print(choose_extra_role(a.run_dir))
         return
     if a.cmd == "guard":
-        ok, msg = chain_guard(a.run_dir, a.role, a.prev_job, a.max_crashes)
+        action, msg = chain_check(a.run_dir, a.role, a.prev_job, a.max_crashes, elapsed_of=job_elapsed,
+                                  hold=a.hold)
         print(f"[chain:{a.role}] {msg}", flush=True)
-        raise SystemExit(0 if ok else 3)
+        raise SystemExit({"run": 0, "stop": 3, "hold": 4}[action])
     if a.cmd == "write-config":
         from .game import add_game_args
 

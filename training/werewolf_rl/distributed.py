@@ -148,8 +148,11 @@ class Heartbeat:
             if self.running:
                 try:
                     self.beat()
-                except OSError:
-                    pass
+                except Exception:  # noqa: BLE001 - a bad extra field must not silence the heartbeat
+                    try:
+                        cont.atomic_write_json(self.path, dict(self.info, t=time.time()))
+                    except OSError:
+                        pass
 
     def stop(self):
         self.running = False
@@ -200,6 +203,7 @@ class TrainerWorker:
         self.loaded = ("v", 0)  # which weights are in the model
         self.games, self.preps = {}, {}  # (step, i) -> GameBatch / prep result, kept for affinity
         self.done_tasks = set()
+        self.started = time.time()
         self.is_leader = False
         self.lease_info = {}
         self.lock = threading.Lock()
@@ -215,7 +219,10 @@ class TrainerWorker:
     # ------------------------------------------------------------------ liveness
     def _heartbeat_extra(self):
         remaining = cont.remaining_seconds()
-        return {"remaining": remaining, "accepting": self._can_take_step(remaining), "leader": self.is_leader}
+        mem = round(torch.cuda.max_memory_reserved() / 1e9, 1) if torch.cuda.is_available() else None
+        return {"remaining": remaining, "accepting": self._can_take_step(remaining), "leader": self.is_leader,
+                "slot": os.environ.get("CHAIN_SLOT"), "tasks_done": len(self.done_tasks), "gpu_mem_gb": mem,
+                "started": self.started}
 
     def _can_take_step(self, remaining=None):
         if remaining is None and os.environ.get("SLURM_JOB_ID"):
@@ -477,25 +484,26 @@ class TrainerWorker:
         """Lead or help until STOP, a yield, or the job's time limit. Returns an exit reason."""
         try:
             while True:
-                if cont.stop_requested(self.run):
-                    return "STOP file"
+                halt = cont.halt_reason(self.run)
+                if halt:
+                    return halt
                 if self.yield_reason:
                     return self.yield_reason
                 if self.try_lead():
                     outcome = Leader(self).run()
                     if outcome in ("stop",):
-                        return "STOP file"
+                        return cont.halt_reason(self.run) or "STOP file"
                     continue
                 if not self._can_take_step(cont.remaining_seconds()):
                     self.log("[trainer] a full step no longer fits in this job; holding the GPU")
-                    while not cont.stop_requested(self.run) and not self.yield_reason:
+                    while not cont.halt_reason(self.run) and not self.yield_reason:
                         lease = _read_json(self.paths["lease"]) or {}
                         step = lease.get("step")
                         if step:  # finish anything already assigned to us
                             for task in self.my_open_tasks(step):
                                 self._safe_task(step, task)
                         time.sleep(self.poll)
-                    return self.yield_reason or "STOP file"
+                    return self.yield_reason or cont.halt_reason(self.run) or "STOP file"
                 lease = _read_json(self.paths["lease"]) or {}
                 step = lease.get("step")
                 tasks = self.my_open_tasks(step) if step else []
@@ -557,7 +565,7 @@ class Leader:
             self.resume()
             while True:
                 self.w._check_lease()
-                if cont.stop_requested(self.run_dir):
+                if cont.halt_reason(self.run_dir):  # STOP or PAUSE: the last step is saved
                     return "stop"
                 if not self._step_fits():
                     self.log("[leader] another step would not fit in this job; handing leadership over")
@@ -763,7 +771,7 @@ class Leader:
         cont.publish_weights(self.run_dir, w.model, self.version)
         w.loaded = ("v", self.version)
         cont.release_claim(self.run_dir, paths, args.keep_rollouts)
-        if step % args.save_every == 0:
+        if args.save_every <= 1 or step % args.save_every == 0:  # 0 behaves like 1: handover needs a checkpoint
             seconds = save_checkpoint(os.path.join(self.learner_dir, f"step_{step:06d}"), w.model, self.critic,
                                       self.ema, self.optimizer, None, w.saved_cfg, w.base_keys, step, args,
                                       version=self.version, keep_last=args.keep_last)

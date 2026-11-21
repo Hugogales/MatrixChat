@@ -8,8 +8,10 @@ per-turn visibility in one KV-cached matrix.
 Rules (see the eval script's docstring for the full description):
 
 * Day d, then Night d, until a side wins (or ``--max_days``).
-* Village wins when every Werewolf is dead; Werewolves win at parity
-  (living Werewolves >= living non-Werewolves).
+* Village wins when every Werewolf is dead. Werewolves win when every
+  non-Werewolf is dead (``--werewolves_win all_dead``, default), or already at
+  parity (living Werewolves >= living non-Werewolves; ``parity``). With
+  6 players / 1 Werewolf that is at most 3 days: the last vote is 1 vs 1, a tie.
 * Day vote: every living player must name another living player (no skip).
   A unique plurality is eliminated; a tie eliminates one tied player at random.
 * Night: the Seer (``--seer``) privately looks at one player's card, then the
@@ -83,6 +85,11 @@ def add_game_args(p):
                    help="single_token (default): only names that are one token after every ballot prefix, "
                         "so a vote is an exact softmax over one token per candidate (required for RL "
                         "rollouts). all: the full name pool (multi-token names are scored by branching).")
+    p.add_argument("--werewolves_win", choices=["all_dead", "parity"], default="all_dead",
+                   help="all_dead (default): the Werewolves win when every other player is dead, so the "
+                        "game goes on until then or until every Werewolf is voted out. parity: they win "
+                        "as soon as they are at least as many as the others (classic rule; games recorded "
+                        "before this option used it).")
     p.add_argument("--max_days", type=int, default=0,
                    help="0 (default) = play until a side wins. N > 0 stops after N days.")
     p.add_argument("--opener", default="Okay, so who do we think the werewolf is?",
@@ -754,12 +761,14 @@ def free_discussion(table, alive, speaker, tokenizer, args, quiet_columns, on_ut
     return utterances, columns, hit_cap, rescues
 
 
-def check_winner(alive, roles):
-    """Village wins when every Werewolf is dead; Werewolves win at parity."""
+def check_winner(alive, roles, rule="all_dead"):
+    """Village wins when every Werewolf is dead. Werewolves win when every other player
+    is dead (``rule="all_dead"``) or at parity (``rule="parity"``)."""
     wolves = sum(roles[s] == "Werewolf" for s in alive)
     if wolves == 0:
         return "Village"
-    if wolves >= len(alive) - wolves:
+    others = len(alive) - wolves
+    if others == 0 or (rule == "parity" and wolves >= others):
         return "Werewolves"
     return None
 
@@ -779,6 +788,7 @@ def play_game(model, tokenizer, args, game_seed, *, record=False, log=print, nam
     if record:
         check_record_args(args)
     n = args.num_players
+    rule = getattr(args, "werewolves_win", "parity")  # configs written before the option: the old rule
     if name_pool is None:
         name_pool = single_token_names(tokenizer, args) if args.name_pool == "single_token" else RANDOM_NAME_POOL
     rng, names, roles, wolves, opener, cards, prelude = deal_roles(
@@ -800,7 +810,7 @@ def play_game(model, tokenizer, args, game_seed, *, record=False, log=print, nam
         log(f"{label(seat)}: {text}")
 
     log("=" * 70)
-    log(f"game_seed={game_seed} players={n} werewolves={len(wolves)} seer={args.seer} "
+    log(f"game_seed={game_seed} players={n} werewolves={len(wolves)} seer={args.seer} werewolves_win={rule} "
         f"discussion={args.discussion_mode} speak_sampling={args.speak_sampling}"
         f"{f' (activity_temperature={args.activity_temperature:g})' if args.speak_sampling == 'bernoulli' else ''}")
     if args.discussion_mode == "free" and args.rescue_after > 0:
@@ -920,7 +930,7 @@ def play_game(model, tokenizer, args, game_seed, *, record=False, log=print, nam
             "voted_out": names[voted_out], "voted_out_role": roles[voted_out],
             "result_text": result,
         })
-        winner = check_winner(alive, roles)
+        winner = check_winner(alive, roles, rule)
         if winner or day == args.max_days:
             break
 
@@ -980,7 +990,7 @@ def play_game(model, tokenizer, args, game_seed, *, record=False, log=print, nam
             "tally": {names[c]: count for c, count in kill_tally.items()},
             "killed": names[killed], "tie_broken_at_random": len(kill_leaders) > 1,
         })
-        winner = check_winner(alive, roles)
+        winner = check_winner(alive, roles, rule)
         if winner:
             break
 
@@ -995,7 +1005,7 @@ def play_game(model, tokenizer, args, game_seed, *, record=False, log=print, nam
 
     result = {
         "game_seed": game_seed, "names": names, "roles": roles, "werewolves": [names[w] for w in wolves],
-        "role_cards": cards, "phases": phases, "winner": winner, "days_played": day,
+        "role_cards": cards, "phases": phases, "winner": winner, "days_played": day, "werewolves_win": rule,
         "alive_at_end": [names[s] for s in alive],
         "villager_mean_p_vote_wolf": p_wolf, "villager_vote_chance": chance,
         "matrix_columns": table.seq_len,

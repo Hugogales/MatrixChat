@@ -23,8 +23,9 @@ All scripts are grouped by purpose. Run every command from the repo root
 - `train_werewolf_rl.py` (+ `.sbatch`) -- Stage-B Werewolf RL (PPO) in one
   job: the same GPUs play games and then train on them.
 - `werewolf_continuous/` -- the always-on Werewolf RL loop: self-renewing
-  H100 + V100 jobs split between playing games and training, plus borrowed
-  idle GPUs. Start / stop / status scripts; see
+  job chains (4×H100 + 8×V100 + 4×V100 by default, follow-ups queued days
+  ahead) split between playing games and training, plus a login-node keeper
+  (cron) that fills free GPU gaps. Start / stop / status scripts; see
   `scripts/training/werewolf_continuous/README.md`.
 
 ## `search/` -- persistent rotating HPO
@@ -40,6 +41,10 @@ All scripts are grouped by purpose. Run every command from the repo root
 
 - `evaluate_checkpoint_suite.py` -- the fixed multi-prompt handoff/listener/
   repetition/privacy probe suite for one checkpoint (small, greedy, fast).
+- `analyze_werewolf_games.py` -- reads a Werewolf RL run's recorded games (or
+  `werewolf_game.py --output` files): longest game the rules allow vs how games
+  ended, vote accuracy vs chance and random voting, discussion length and cap
+  hits, self-claims, per-version trends, and `--show` transcripts.
 - `demo_handoff_variation.py` (+ `.sbatch` launcher) -- the BROAD stochastic
   sweep (prompts x agent counts x seeds x context kinds, with
   chain-continuation for 2nd/3rd handoffs). Context kinds include

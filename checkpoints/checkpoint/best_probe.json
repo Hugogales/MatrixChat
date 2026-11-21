@@ -1,0 +1,104 @@
+{
+  "best_probe_score": 0.5700000000000001,
+  "epoch": 0,
+  "step": 700,
+  "probe": {
+    "clean_handoff_rate": 1.0,
+    "no_listener_response_rate": 0.0,
+    "listener_response_rate": 1.0,
+    "nonoverlap_listener_rate": 1.0,
+    "overlap_listener_rate": 0.0,
+    "mixed_response_rate": 0.0,
+    "unwanted_interruption_rate": 0.8,
+    "overlap_rate": 0.0,
+    "distinct_1": 0.4286,
+    "distinct_2": 0.704,
+    "repeated_4gram_fraction": 0.1041,
+    "duration_sec": 60.68,
+    "calibration_summary": {
+      "handoff_listener_p_speak_initial_mean": 0.0212,
+      "handoff_listener_p_speak_final_mean": 0.2099,
+      "handoff_listener_p_speak_delta_mean": 0.1887,
+      "handoff_listener_p_speak_max_mean": 0.5138,
+      "handoff_reference_p_speak_delta_mean": -0.751,
+      "listener_listener_p_speak_final_mean": 0.3308
+    },
+    "generation_topology_summary": {
+      "all": {
+        "columns": 320,
+        "soft": {
+          "p0": 0.21984325256198645,
+          "p_same": 0.5816616460680961,
+          "p_handoff": 0.1362019905820489,
+          "p_overlap": 0.06229311041533947
+        },
+        "soft_unique_owner": {
+          "columns": 232,
+          "same": 0.8840633802886667,
+          "handoff": 0.11593664488915739
+        },
+        "realized": {
+          "silence": 0.3,
+          "same": 0.625,
+          "handoff": 0.075,
+          "overlap": 0.0
+        },
+        "realized_unique_owner_exactly_one": {
+          "columns": 207,
+          "same": 0.966183574879227,
+          "handoff": 0.033816425120772944
+        }
+      },
+      "handoff_prompts": {
+        "columns": 160,
+        "soft": {
+          "p0": 0.2526872122660279,
+          "p_same": 0.5299503073096276,
+          "p_handoff": 0.16015977114439012,
+          "p_overlap": 0.05720270834863186
+        },
+        "soft_unique_owner": {
+          "columns": 109,
+          "same": 0.8496845588771575,
+          "handoff": 0.15031547468463216
+        },
+        "realized": {
+          "silence": 0.35625,
+          "same": 0.55625,
+          "handoff": 0.0875,
+          "overlap": 0.0
+        },
+        "realized_unique_owner_exactly_one": {
+          "columns": 94,
+          "same": 0.9468085106382979,
+          "handoff": 0.05319148936170213
+        }
+      },
+      "listener_prompts": {
+        "columns": 160,
+        "soft": {
+          "p0": 0.18699929285794498,
+          "p_same": 0.6333729848265648,
+          "p_handoff": 0.11224421001970768,
+          "p_overlap": 0.06738351248204708
+        },
+        "soft_unique_owner": {
+          "columns": 123,
+          "same": 0.9145291651167521,
+          "handoff": 0.08547085263137895
+        },
+        "realized": {
+          "silence": 0.24375,
+          "same": 0.69375,
+          "handoff": 0.0625,
+          "overlap": 0.0
+        },
+        "realized_unique_owner_exactly_one": {
+          "columns": 113,
+          "same": 0.9823008849557522,
+          "handoff": 0.017699115044247787
+        }
+      }
+    }
+  }
+}

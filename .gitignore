@@ -11,6 +11,9 @@ __pycache__/
 venv/
 env/
 
+# Per-machine editor/agent settings (the shared .claude/*.md stays tracked)
+.claude/settings.local.json
+
 # Run artifacts (keep the directories via .gitkeep, ignore generated contents)
 hyperparameters/run_*.json
 logs/run_*/
@@ -18,8 +21,18 @@ logs/*.out
 logs/*.err
 logs/slurm/*.out
 logs/slurm/*.err
+# Werewolf game transcripts (scripts/eval/werewolf_game.py --output)
+logs/werewolf_games/
 checkpoints/run_*/
 checkpoints/**/*.pt
+# Werewolf RL runs: ignore single-job runs (train_werewolf_rl.sbatch:
+# checkpoints/werewolf_rl/run_*) and everything an always-on run writes
+# (launch.*, pool/, learner/, weights/, train/, logs/, heartbeats/, chain/,
+# keeper/, ...), but keep each always-on run's game_config.json (its game rules).
+checkpoints/werewolf_rl/*
+!checkpoints/werewolf_rl/continuous/
+checkpoints/werewolf_rl/continuous/*/*
+!checkpoints/werewolf_rl/continuous/*/game_config.json
 
 # Local model downloads (e.g. Qwen3-4B pulled from the HF Hub)
 models/

@@ -52,7 +52,8 @@ DEFAULTS = {
     "depth": 14,
     "report_minutes": 60,   # hourly ntfy GPU report (report.py; 0 = off)
     "time_min": "00:30:00",  # sbatch --time-min for chain and gap jobs ("" = off): see README 2.3
-    "extra_partitions": ["dgxh100"],  # where the gap slot grabs GPUs beyond the targets (and gives them back)
+    # where the gap slot grabs GPUs beyond the targets (and gives them back when another user needs them)
+    "extra_partitions": ["dgxh100", "dgx"],
     "job_cap": 4,
     "gap_partitions": ["dgx", "dgxh100"],
     "gap_max_gpus": 8,
@@ -65,6 +66,10 @@ DEFAULTS = {
     "mem_per_gpu_gb": 48,
 }
 WAITING = ("Resources", "Priority", "None")
+# Work per GPU, relative to a V100: picks between extra holes on different partitions (the
+# gap slot can hold only one). Measured on run1 (2026-11-20): games 21.3 vs 9.2 columns/s per
+# GPU on H100 vs V100, trainer tasks ~4.5x faster; so 3 free H100 beat 5 free V100, 8 V100 beat 2 H100.
+GPU_SPEED = {"dgxh100": 2.3, "dgx": 1.0}
 CRON_TAG = "# werewolf_rl keeper"
 LIVE = ("RUNNING", "PENDING", "CONFIGURING", "COMPLETING", "SUSPENDED")
 
@@ -618,10 +623,17 @@ def tick(run_dir, slurm=None, now=None, dry_run=False, log=print, wait=True):
             tried = 0
             cands = holes(spec, nodes, limit, short, state.get("backoff"), now, parts=parts)
             if mode == "extra":
-                wanted = [r for r in requests if request_fits(r, _free_nodes(nodes, r["partitions"]))]
-                if wanted:
-                    act(f"{g}: no extra GPUs taken: another user's job {wanted[0]['job']} could use them")
-                    cands = []
+                # Not on a partition where another user's waiting job could use the free GPUs now.
+                wanted = {}
+                for r in requests:
+                    if request_fits(r, _free_nodes(nodes, r["partitions"])):
+                        for rp in r["partitions"]:
+                            wanted.setdefault(rp, r)
+                for wp in [x for x in parts if x in wanted and any(c[0] == x for c in cands)]:
+                    act(f"{g}: no extra GPUs taken on {wp}: another user's job {wanted[wp]['job']} could use them")
+                cands = [c for c in cands if c[0] not in wanted]
+                # Most work first: an H100 does ~2.3x a V100's (GPU_SPEED).
+                cands.sort(key=lambda c: -c[2] * GPU_SPEED.get(c[0], 1.0))
             for part, node, n in cands:
                 if tried >= 3:
                     break

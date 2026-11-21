@@ -11,6 +11,9 @@ trainer (`scripts/training/train_werewolf_rl.py`) and the eval script
 (`scripts/eval/werewolf_game.py`) use. This folder only adds the machinery to
 run them continuously across machines.
 
+For a shorter overview of how the pieces fit together, read
+[docs/WEREWOLF_CONTINUOUS_TRAINING.md](../../../docs/WEREWOLF_CONTINUOUS_TRAINING.md) first.
+
 ---
 
 ## 1. Quick start
@@ -212,11 +215,15 @@ This is how the H100 chain runs while such a booking lasts:
 * The queue depth counts jobs, not days: with 30-minute pieces, the 14 queued follow-ups
   are about 7 h old when they start, not 14 days.
 
-**Extra GPUs beyond the targets** (`EXTRA_GPU_PARTITIONS`, default `dgxh100`). When every
-chain holds its target, the keeper puts the free job slot (Rosie allows 4 running jobs per
-user; the 3 chains use 3) to work as an **extra** job:
-* it takes all free GPUs on one node of an extra partition, but only if no waiting job of
-  another user could use them;
+**Extra GPUs beyond the targets** (`EXTRA_GPU_PARTITIONS`, default `dgxh100,dgx`: H100 and
+V100). When every chain holds its target, the keeper puts the free job slot (Rosie allows 4
+running jobs per user; the 3 chains use 3) to work as an **extra** job:
+* it takes all free GPUs on one node of an extra partition, but not on a partition where a
+  waiting job of another user could use the free GPUs;
+* there is one slot, so when both partitions have free GPUs it takes the hole that does the
+  most work: an H100 counts as 2.3 V100s (`GPU_SPEED` in keeper.py, measured on run1), so
+  3 free H100s beat 5 free V100s and 8 free V100s beat 2 free H100s. A running extra job is
+  not swapped for a better hole (that would restart its players);
 * every minute, the extra job asks `keeper yield-check` whether another user's waiting job
   (one waiting for resources, not one held back by its own limits or dependencies) would
   fit once these GPUs are free and doesn't fit now. If so, it sends a `gpu` alert ("gave
@@ -254,8 +261,9 @@ reservation (`scontrol create reservation`, admins only) for the run's nodes.
    job, below), when a chain job is blocked by the 4-jobs-per-user limit, or when
    the gap job holds GPUs a waiting chain job needs;
 3b. when every chain holds its target, starts an **extra** job in that slot on
-   `EXTRA_GPU_PARTITIONS` (all free GPUs on one node, unless another user's waiting
-   job could use them), and ends it as soon as another user's waiting job would fit
+   `EXTRA_GPU_PARTITIONS` (H100 or V100: all free GPUs on one node, not on a partition
+   where another user's waiting job could use them; the hole with the most work wins),
+   and ends it as soon as another user's waiting job would fit
    in its GPUs (2.3, "Extra GPUs"). The extra job checks this itself every minute;
 4. cancels a gap job still waiting after 10 minutes (that hole closed) and
    doesn't try that size on that partition again for an hour;
@@ -503,7 +511,7 @@ choice, chain guard and follow-up lines, crashes).
 | `KEEPER` | `1` | `0` = don't install the keeper's cron line. |
 | `REPORT_MINUTES` | `60` | The keeper's ntfy report of every GPU, sent this often on the clock (`0` = off). |
 | `TIME_MIN` | `00:30:00` | `--time-min` of every chain and gap job: start at once with a shorter limit when Slurm holds a node free for an older job (2.3). `""` = off. |
-| `EXTRA_GPU_PARTITIONS` | `dgxh100` | Where the gap slot also grabs GPUs beyond the chain targets, given back as soon as another user's job needs them (2.3). `""` = off. |
+| `EXTRA_GPU_PARTITIONS` | `dgxh100,dgx` | Where the gap slot also grabs GPUs beyond the chain targets (H100 and V100), given back as soon as another user's job needs them (2.3). `""` = off. |
 | `TRAINER_ARGS` | `--games_per_step 16 --save_every 1 --keep_last 3` | Extra `trainer.py` flags (below). |
 | `PLAYER_ARGS` | empty | Extra `player.py` flags (below). |
 | `GAME_ARGS` | empty | Game and sampling flags from `game.add_game_args` (e.g. `--seer`, `--num_players 7`). Applied when the run is first created or whenever given. |

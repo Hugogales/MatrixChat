@@ -46,8 +46,9 @@
 #   REPORT_MINUTES=60  the keeper sends an ntfy report of every GPU this often, on the clock (0 = off)
 #   TIME_MIN=00:30:00  sbatch --time-min of every chain/gap job: Slurm may start it at once with a
 #                      shorter limit when an older job's reservation keeps the node free ("" = off)
-#   EXTRA_GPU_PARTITIONS=dgxh100  where the gap slot also grabs GPUs beyond the chain targets while
-#                      the chains hold theirs, given back as soon as another user's job needs them
+#   EXTRA_GPU_PARTITIONS=dgxh100,dgx  where the gap slot also grabs GPUs beyond the chain targets
+#                      (H100 and V100) while the chains hold theirs, given back as soon as another
+#                      user's job needs them ("" = off)
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -72,7 +73,7 @@ GAME_ARGS="${GAME_ARGS:-}"
 KEEPER="${KEEPER:-1}"
 REPORT_MINUTES="${REPORT_MINUTES:-60}"
 TIME_MIN="${TIME_MIN-00:30:00}"
-EXTRA_GPU_PARTITIONS="${EXTRA_GPU_PARTITIONS-dgxh100}"
+EXTRA_GPU_PARTITIONS="${EXTRA_GPU_PARTITIONS-dgxh100,dgx}"
 
 python -c "import torch" 2>/dev/null || {
   echo "The python on PATH ($(command -v python)) has no torch; activate the repo's .venv first."; exit 1; }

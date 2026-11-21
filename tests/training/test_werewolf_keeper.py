@@ -89,10 +89,13 @@ def test_gap_fills_shortfall_only_while_chains_wait(tmp_path):
     queue, cancel, fill = kp.plan(spec, kp.by_role(spec, full_chains()), nodes, {}, 0.0)
     assert queue == [] and cancel == [] and fill == ["gap1"]
     # chains running at their target: a gap job off the extra partitions is ended, and the slot is
-    # refilled with extra GPUs on the extra partitions (dgxh100); without extra partitions, nothing.
+    # refilled with extra GPUs on the extra partitions (here only dgxh100); without extra partitions, nothing.
     jobs = full_chains(running=True) + [job(900, "gap1", "RUNNING", "dgx", 1, node="a", reason="None")]
-    _, cancel, fill = kp.plan(spec, kp.by_role(spec, jobs), nodes, {}, 0.0)
+    _, cancel, fill = kp.plan(dict(spec, extra_partitions=["dgxh100"]), kp.by_role(spec, jobs), nodes, {}, 0.0)
     assert fill == ["gap1"] and cancel and cancel[0][0] == "gap1" and "target" in cancel[0][1]
+    # by default V100s are extras too: that gap job is an extra and is kept
+    _, cancel, fill = kp.plan(spec, kp.by_role(spec, jobs), nodes, {}, 0.0)
+    assert spec["extra_partitions"] == ["dgxh100", "dgx"] and cancel == [] and fill == []
     _, cancel, fill = kp.plan(dict(spec, extra_partitions=[]), kp.by_role(spec, jobs), nodes, {}, 0.0)
     assert fill == [] and cancel and "target" in cancel[0][1]
 
@@ -474,7 +477,7 @@ def test_extra_gpus_kept_until_another_users_job_fits(tmp_path):
     assert not kp.is_extra(spec, roles_short, gap) and kp.yield_reason(spec, roles_short, gap, [two], nodes) is None
 
 
-def test_tick_grabs_extra_h100s_only_when_nobody_could_use_them(tmp_path):
+def test_tick_grabs_extra_gpus_only_where_nobody_could_use_them(tmp_path):
     spec = h100_spec(tmp_path)
     run = spec["run_dir"]
     jobs = full_chains(running=True)
@@ -490,7 +493,50 @@ def test_tick_grabs_extra_h100s_only_when_nobody_could_use_them(tmp_path):
                                                                    "TresPerNode": "gres/gpu:2", "Partition": "dgxh100"}),
                                                 job="555", user="x", reason="Priority")]
     summary = kp.tick(spec["run_dir"], slurm=fake2, now=2000.0, wait=False)
-    assert fake2.submitted == [] and any("could use them" in a for a in summary["actions"])
+    # that job could use the free H100s, so none are taken; the free V100s (nobody waits for them) are
+    assert any("no extra GPUs taken on dgxh100" in a and "555" in a for a in summary["actions"]), summary["actions"]
+    assert len(fake2.submitted) == 1 and "--partition=dgx" in fake2.submitted[0][0] and "--gres=gpu:5" in fake2.submitted[0][0]
+
+
+def test_extra_v100s_are_taken_and_given_back_like_h100s(tmp_path):
+    spec = make_spec(tmp_path)
+    run = spec["run_dir"]
+
+    def grab(nodes, waiting=()):
+        fake = FakeSlurm(full_chains(running=True), nodes)
+        fake.waiting_requests = lambda part: [r for r in waiting if part in r["partitions"]]
+        summary = kp.tick(run, slurm=fake, now=1000.0, wait=False)
+        return [a for a, _ in fake.submitted], summary["actions"]
+
+    def want(gpus, part):
+        return dict(kp.parse_request({"NumNodes": "1", "NumCPUs": "4", "TresPerNode": f"gres/gpu:{gpus}",
+                                      "Partition": part}), job=f"{part}-{gpus}", user="x", reason="Resources")
+
+    # one slot, most work first (an H100 = 2.3 V100s): 8 V100 beat 1 H100, 3 H100 beat 5 V100, ties go to H100
+    sub, _ = grab({"dgxh100": {"h1": free(1, 200, 1500)}, "dgx": {"d3": free(8, 80, 500)}})
+    assert len(sub) == 1 and "--partition=dgx" in sub[0] and "--gres=gpu:8" in sub[0]
+    sub, _ = grab({"dgxh100": {"h1": free(3, 200, 1500)}, "dgx": {"d3": free(5, 80, 500)}})
+    assert "--partition=dgxh100" in sub[0] and "--gres=gpu:3" in sub[0]
+    # another user waits for a V100 that is free: no V100 extras, the free H100s are taken instead
+    sub, acts = grab({"dgxh100": {"h1": free(2, 200, 1500)}, "dgx": {"d3": free(8, 80, 500)}}, [want(1, "dgx")])
+    assert "--partition=dgxh100" in sub[0] and any("no extra GPUs taken on dgx:" in a for a in acts)
+    # ... and for both: nothing is taken
+    sub, _ = grab({"dgxh100": {"h1": free(2, 200, 1500)}, "dgx": {"d3": free(8, 80, 500)}},
+                  [want(1, "dgx"), want(2, "dgxh100")])
+    assert sub == []
+
+    # a running V100 extra gives its GPUs back when another user's V100 job would fit in them
+    jobs = full_chains(running=True)
+    gap = job(900, "gap1", "RUNNING", "dgx", 4, node="d3", reason="None")
+    roles = kp.by_role(spec, jobs + [gap])
+    nodes = {"dgx": {"d3": free(0, 40, 200)}, "dgxh100": {"h1": free(0, 200, 1500)}}
+    assert kp.is_extra(spec, roles, gap)
+    assert "job dgx-2" in kp.yield_reason(spec, roles, gap, [want(2, "dgx")], nodes)
+    assert kp.yield_reason(spec, roles, gap, [want(2, "dgxh100")], nodes) is None    # other partition
+    assert kp.yield_reason(spec, roles, gap, [want(5, "dgx")], nodes) is None        # 4 would not be enough
+    # one V100 chain between jobs: the gap job covers our 12-V100 minimum, so it keeps its GPUs
+    short = kp.by_role(spec, [j for j in jobs if j["name"] != "wwc-run1-v100b"] + [gap])
+    assert not kp.is_extra(spec, short, gap) and kp.yield_reason(spec, short, gap, [want(2, "dgx")], nodes) is None
 
 
 def test_sbatch_opts_time_min(tmp_path):
@@ -498,5 +544,5 @@ def test_sbatch_opts_time_min(tmp_path):
     assert "--time-min=00:30:00" in kp.sbatch_opts(spec, "dgxh100", 4)
     assert not any(o.startswith("--time-min") for o in kp.sbatch_opts(dict(spec, time_min=""), "dgx", 8))
     env = open(os.path.join(spec["run_dir"], "launch.env")).read()
-    assert "export CHAIN_TIME_MIN=00:30:00" in env and "export EXTRA_GPU_PARTITIONS=dgxh100" in env
+    assert "export CHAIN_TIME_MIN=00:30:00" in env and "export EXTRA_GPU_PARTITIONS=dgxh100,dgx\n" in env
     assert "--time-min=00:30:00" in env.split("CHAIN_OPTS_h100=")[1].splitlines()[0]
